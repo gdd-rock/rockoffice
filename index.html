@@ -1,0 +1,1919 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>⛏️ 星辰科技 Minecraft 3D Office v3</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace}
+#hud{position:fixed;top:10px;left:10px;z-index:10;color:#fff;font-size:20px;text-shadow:1px 1px 2px #000;pointer-events:none}
+#hud .title{font-size:30px;color:#FFD700;font-weight:bold}
+#info{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(0,0,0,0.85);border:3px solid #555;padding:15px 30px;color:#fff;font-size:18px;text-align:center;display:none;min-width:300px;pointer-events:none;max-width:500px}
+#info .n{color:#FFD700;font-size:20px;font-weight:bold}
+#info .h{color:#55FF55;font-size:18px}
+#info .r{color:#aaa;margin-top:4px}
+#info .s{color:#55FF55;margin-top:2px;font-size:16px}
+#info .mood{margin-top:4px;font-size:18px}
+#tip{position:fixed;bottom:5px;right:10px;z-index:10;color:#888;font-size:16px}
+#buttons{position:fixed;top:10px;right:10px;z-index:10;display:flex;flex-direction:column;gap:5px}
+#buttons button{background:rgba(0,0,0,0.7);border:2px solid #FFD700;color:#FFD700;padding:6px 12px;cursor:pointer;font-family:'Courier New';font-size:12px;text-align:left;transition:all .2s}
+#buttons button:hover{background:rgba(255,215,0,0.2)}
+#buttons button.active{border-color:#55FF55;color:#55FF55}
+#event-log{position:fixed;bottom:60px;right:10px;z-index:10;background:rgba(0,0,0,0.7);border:1px solid #444;padding:10px;width:340px;max-height:250px;overflow-y:auto;font-size:16px;color:#ccc;display:none}
+#event-log .ev{margin:2px 0;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
+#event-log .ev .t{color:#888;font-size:11px}
+#event-log .fight{color:#FF4444}
+#event-log .praise{color:#FFD700}
+#event-log .chat{color:#88CCFF}
+#event-log .mood{color:#CC88FF}
+#event-log .play{color:#55FF55}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="title">⛏️ 星辰科技 MINECRAFT HQ</div>
+  <div>21 Bots | <span id="clock"></span></div>
+</div>
+<div id="buttons">
+  <button onclick="cmdAssemble()">📢 全体集合</button>
+  <button onclick="cmdExercise()">🏋️ 全体操练</button>
+  <button onclick="cmdDismiss()">🔔 解散回岗</button>
+  <button onclick="cmdMeeting()">📋 全体开会</button>
+  </div>
+<div id="event-log"></div>
+<div id="info"></div>
+<div id="tip">🖱️ 左键旋转 | 滚轮缩放 | 右键平移</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,500);
+camera.position.set(55,38,55);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+document.body.appendChild(renderer.domElement);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.target.set(24,0,20);
+controls.enableDamping=true;controls.dampingFactor=0.08;
+controls.minDistance=10;controls.maxDistance=80;
+controls.maxPolarAngle=Math.PI*0.45;
+controls.update();
+
+scene.background=new THREE.Color(0x88CCEE);
+scene.fog=new THREE.Fog(0x88CCEE,60,120);
+
+// Lights - bright and pleasant
+scene.add(new THREE.AmbientLight(0xffffff,0.65));
+const sun=new THREE.DirectionalLight(0xFFF5E0,0.6);
+sun.position.set(30,40,20);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-40;sun.shadow.camera.right=40;
+sun.shadow.camera.top=40;sun.shadow.camera.bottom=-40;
+scene.add(sun);
+
+
+const RW=48,RH=44;
+const grid=[];for(let i=0;i<RW*RH;i++)grid[i]=0;
+function sG(x,z,v){if(x>=0&&x<RW&&z>=0&&z<RH)grid[z*RW+x]=v;}
+function gG(x,z){if(x<0||x>=RW||z<0||z>=RH)return 1;return grid[z*RW+x];}
+
+/*  ╔══════════════════════════════════════════════════╗
+    ║  FLOOR PLAN — 48×40 (top-down, Z=0 is top/north)║
+    ║                                                  ║
+    ║  Z 0-1   : Exterior wall                        ║
+    ║  Z 1-9   : CEO Office(1-12) | Meeting(14-24)   ║
+    ║            | Medical(26-35) | Reception(37-46)   ║
+    ║  Z 9-10  : Corridor                             ║
+    ║  Z 10-19 : Open-plan workspace (all 21 desks)   ║
+    ║  Z 19-20 : Corridor                             ║
+    ║  Z 20-27 : Gym(1-10) | Rest/Tea(12-22)         ║
+    ║            | Entertainment(24-35) | Storage(37-46)║
+    ║  Z 27-28 : South wall                           ║
+    ║  Z 28+   : Outdoor (grass, farm, pond, assembly)║
+    ╚══════════════════════════════════════════════════╝  */
+
+// ===== EXTERIOR WALLS =====
+for(let i=0;i<RW;i++){sG(i,0,1);sG(i,RH-1,1);}
+for(let i=0;i<RH;i++){sG(0,i,1);sG(RW-1,i,1);}
+// Main entrance (south wall, centered)
+for(let x=20;x<=27;x++)sG(x,RH-1,0);
+// Clear lobby area
+for(let x=1;x<RW-1;x++)for(let z=33;z<RH-1;z++)sG(x,z,0);
+// Emergency exit (north side)
+sG(24,0,0);sG(25,0,0);
+
+// ===== HORIZONTAL CORRIDORS =====
+// North corridor z=9 (open, no wall - just mark floor different)
+// South corridor z=19 (open)
+// But we add partial walls to define rooms:
+
+// ===== CEO OFFICE (x:1-11, z:1-8) =====
+for(let z=1;z<=8;z++)sG(12,z,1); // East wall
+sG(12,4,0);sG(12,5,0); // Door
+for(let x=1;x<=11;x++)sG(x,9,1); // South wall (corridor boundary)
+sG(5,9,0);sG(6,9,0); // Door to corridor
+
+// ===== MEETING ROOM (x:14-23, z:1-8) =====
+for(let z=1;z<=8;z++){sG(13,z,1);sG(24,z,1);} // Side walls
+sG(13,4,0);sG(13,5,0); // Door from CEO
+sG(24,4,0);sG(24,5,0); // Door east
+for(let x=14;x<=23;x++)sG(x,9,1); // South wall
+sG(18,9,0);sG(19,9,0); // Door to corridor
+
+// ===== MEDICAL ROOM (x:26-35, z:1-8) =====
+for(let z=1;z<=8;z++){sG(25,z,1);sG(36,z,1);}
+sG(25,4,0);sG(25,5,0); // Door west
+for(let x=26;x<=35;x++)sG(x,9,1);
+sG(30,9,0);sG(31,9,0); // Door to corridor
+
+// ===== SERVER ROOM 机房 (x:38-46, z:1-8) =====
+for(let z=1;z<=8;z++)sG(37,z,1);
+sG(37,4,0);sG(37,5,0); // Door
+for(let x=38;x<=46;x++)sG(x,9,1);
+sG(42,9,0);sG(43,9,0); // Door to corridor
+
+// ===== OPEN WORKSPACE (x:1-46, z:10-18) — no internal walls, open plan =====
+for(let x=1;x<RW-1;x++){sG(x,10,0);sG(x,18,0);} // Clear corridor lines
+// South boundary of workspace
+for(let x=1;x<RW-1;x++)sG(x,23,1);
+// Gaps for doors
+for(let dx=0;dx<6;dx++){sG(5+dx,23,0);sG(20+dx,23,0);sG(35+dx,23,0);}
+
+// ===== GYM (x:1-10, z:20-27) =====
+for(let z=24;z<=31;z++)sG(11,z,1);
+sG(11,27,0);sG(11,28,0);
+for(let x=1;x<=10;x++){sG(x,31,1);sG(x,24,0);}
+sG(5,31,0);sG(6,31,0); // Gym south door
+
+// ===== REST/TEA AREA (x:12-22, z:20-27) =====
+for(let z=24;z<=31;z++){sG(23,z,1);}
+sG(23,27,0);sG(23,28,0);
+for(let x=12;x<=22;x++)sG(x,31,1);
+sG(17,31,0);sG(18,31,0); // Rest south door
+
+// ===== ENTERTAINMENT (x:24-35, z:20-27) =====
+for(let z=24;z<=31;z++)sG(36,z,1);
+sG(36,27,0);sG(36,28,0);
+for(let x=24;x<=35;x++)sG(x,31,1);
+sG(29,31,0);sG(30,31,0); // Entertainment south door
+
+// ===== BATHROOM (x:38-46, z:20-27) =====
+for(let z=24;z<=31;z++)sG(37,z,1);
+sG(37,27,0);sG(37,28,0); // Door
+for(let x=38;x<RW-1;x++)sG(x,31,1);
+sG(42,31,0);sG(43,31,0); // Bathroom south door
+
+// ===== SOUTH WALL removed — room walls at z=27 serve as boundary =====
+// Only keep corner pillars
+// no south pillar needed
+
+
+const mc={};
+function gM(c){const k=c.toString(16);if(!mc[k])mc[k]=new THREE.MeshLambertMaterial({color:c});return mc[k];}
+
+// ===== RENDER FLOOR + WALLS =====
+const fg=new THREE.BoxGeometry(1,0.15,1);
+for(let x=0;x<RW;x++)for(let z=0;z<RH;z++){
+  const v=gG(x,z);
+  if(v===1){
+    const isExt=x===0||x===RW-1||z===0||z===RH-1;
+    const wc=isExt?0xE8DDD0:0xD8CCBB;
+    const w=new THREE.Mesh(new THREE.BoxGeometry(1,3.5,1),gM(wc));
+    w.position.set(x+.5,1.75,z+.5);w.castShadow=true;w.receiveShadow=true;scene.add(w);
+    if(isExt&&(x+z)%4===0){
+      const isX=x===0||x===RW-1;
+      const g2=new THREE.Mesh(new THREE.BoxGeometry(isX?.12:.6,1.2,isX?.6:.12),
+        new THREE.MeshLambertMaterial({color:0xAADDFF,transparent:true,opacity:0.4}));
+      g2.position.set(x+.5,2.1,z+.5);scene.add(g2);
+    }
+  } else {
+    let color;const ck=(x+z)%2===0;
+    // CEO office
+    if(x>=1&&x<=11&&z>=1&&z<=8) color=ck?0xD4B896:0xC8AA85;
+    // Meeting room
+    else if(x>=14&&x<=23&&z>=1&&z<=8) color=ck?0xBBC8D8:0xAABBCC;
+    // Medical room
+    else if(x>=26&&x<=35&&z>=1&&z<=8) color=ck?0xDDEEDD:0xCCDDCC;
+    // Corridors (z=9 or z=19)
+    else if(z===9||z===23) color=ck?0xCCCCCC:0xBBBBBB;
+    // Open workspace
+    else if(z>=10&&z<=22) color=ck?0xE5DDD5:0xDAD2CA;
+    // Gym
+    else if(x>=1&&x<=10&&z>=24&&z<=31) color=ck?0xC5D5C0:0xB8C8B3;
+    // Rest area
+    else if(x>=12&&x<=22&&z>=24&&z<=31) color=ck?0xE0D5CC:0xD5CABB;
+    // Entertainment
+    else if(x>=24&&x<=35&&z>=24&&z<=31) color=ck?0xD0C0D8:0xC5B5CC;
+    // Server room
+    else if(x>=38&&z>=1&&z<=8) color=ck?0xCCCCDD:0xBBBBCC;
+    // Bathroom
+    else if(x>=38&&z>=24&&z<=31) color=ck?0xCCDDDD:0xBBCCCC;
+    else color=ck?0xDDCCBB:0xCCBBAA;
+    const t=new THREE.Mesh(fg,gM(color));
+    t.position.set(x+.5,-0.07,z+.5);t.receiveShadow=true;scene.add(t);
+  }
+}
+
+// ===== OUTDOOR AREA =====
+// Grass
+const grs=new THREE.Mesh(new THREE.PlaneGeometry(120,60),gM(0x6B9E4A));
+grs.rotation.x=-Math.PI/2;grs.position.set(24,-0.16,RH+25);grs.receiveShadow=true;scene.add(grs);
+// Assembly area (paved)
+for(let x=10;x<38;x++)for(let z=RH;z<RH+14;z++){
+  const t=new THREE.Mesh(fg,gM((x+z)%2?0x999999:0xAAAAAA));
+  t.position.set(x+.5,-0.07,z+.5);t.receiveShadow=true;scene.add(t);
+}
+
+// ===== LOBBY / RECEPTION (z:29-38, near main entrance) =====
+// Lobby floor
+for(let x=1;x<RW-1;x++)for(let z=33;z<RH-1;z++){
+  if(gG(x,z)===0){
+    const ck=(x+z)%2===0;
+    const t=new THREE.Mesh(fg,gM(ck?0xE0D5CC:0xD5CABB));
+    t.position.set(x+.5,-0.07,z+.5);t.receiveShadow=true;scene.add(t);
+  }
+}
+
+// ===== AREA SIGNS =====
+function mkSign(text,x,y,z,color,scale){
+  const c=document.createElement('canvas');c.width=512;c.height=48;
+  const ct=c.getContext('2d');
+  ct.font='bold 26px sans-serif';const tw=ct.measureText(text).width;c.width=tw+30;ct.font='bold 26px sans-serif';
+  ct.fillStyle='rgba(255,255,255,0.85)';ct.fillRect(0,0,c.width,48);ct.strokeStyle=color;ct.lineWidth=3;ct.strokeRect(1,1,c.width-2,46);
+  ct.fillStyle=color;ct.textAlign='center';
+  ct.fillText(text,c.width/2,34);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true}));
+  s.scale.set(scale||4,.8,1);s.position.set(x,y,z);scene.add(s);return s;
+}
+
+mkSign('👑 洛克·总经理室',6,3.2,1.5,'#FF6B35',5);
+mkSign('📋 会议室',18,3.2,1.5,'#2255AA',3.5);
+mkSign('🏥 医疗室',30,3.2,1.5,'#CC0000',3.5);
+
+mkSign('💻 开放工区',24,3.2,10.5,'#336633',4);
+mkSign('🏋️ 健身房',5,3.2,24.5,'#448844',3.5);
+mkSign('☕ 茶水·休息区',17,3.2,24.5,'#886644',4);
+mkSign('🎮 娱乐区',30,3.2,24.5,'#6622AA',3.5);
+mkSign('🚻 卫生间',42,3.2,24.5,'#336699',3.5);
+mkSign('🚪 EXIT',24,3.2,RH-0.5,'#CC0000',3);
+
+// ===== DESK POSITIONS (Open workspace z:11-17) =====
+const DP={
+  // Row 1 (z:11) — Operations & Intelligence (4-tile spacing)
+  运营中心:{x:2,z:13},资源管理:{x:6,z:13},邮件助手:{x:10,z:13},
+  社区治理:{x:14,z:13},市场情报:{x:18,z:13},营销推广:{x:22,z:13},
+  // Row 2 (z:15) — Tech & AI (wider row gap)
+  技术总监:{x:2,z:19},量化开发:{x:6,z:19},调优专家:{x:10,z:19},
+  平台运维:{x:14,z:19},视频制作:{x:18,z:19},社交运营:{x:22,z:19},
+  // Row 3 (z:11 right side) — API Team
+  跨模态:{x:28,z:13},模型代理:{x:32,z:13},接口服务:{x:36,z:13},
+  开发接口:{x:40,z:13},模型计费:{x:44,z:13},
+  // Row 4 (z:15 right side) — Finance & Trading
+  加密投研:{x:28,z:19},订单管理:{x:32,z:19},
+  // Persona - near reception
+  林夏:{x:22,z:37},
+  客服小助:{x:26,z:37},
+};
+
+function addDesk(x,z){
+  const g=new THREE.Group();
+  const top=new THREE.Mesh(new THREE.BoxGeometry(1.5,.08,.85),gM(0xB8956A));
+  top.position.y=.72;top.castShadow=true;g.add(top);
+  [[-.65,-.35],[.65,-.35],[-.65,.35],[.65,.35]].forEach(([a,b])=>{
+    const l=new THREE.Mesh(new THREE.BoxGeometry(.06,.72,.06),gM(0x8B6240));
+    l.position.set(a,.36,b);g.add(l);
+  });
+  const m=new THREE.Mesh(new THREE.BoxGeometry(.5,.38,.05),gM(0x222222));
+  m.position.set(0,1.0,-.2);g.add(m);
+  const s=new THREE.Mesh(new THREE.BoxGeometry(.44,.3,.02),new THREE.MeshBasicMaterial({color:0x224488}));
+  s.position.set(0,1.0,-.17);g.add(s);
+  g.position.set(x+.5,0,z+.5);scene.add(g);
+  sG(x,z,2);
+}
+function addChair(x,z){
+  const g=new THREE.Group();
+  const seat=new THREE.Mesh(new THREE.BoxGeometry(.45,.06,.45),gM(0xCC3333));
+  seat.position.set(0,.45,0);g.add(seat);
+  const back=new THREE.Mesh(new THREE.BoxGeometry(.45,.45,.06),gM(0xAA2222));
+  back.position.set(0,.7,-.2);g.add(back);
+  g.position.set(x+.5,0,z+1.2);scene.add(g);
+}
+Object.values(DP).forEach(d=>{addDesk(d.x,d.z);addChair(d.x,d.z);});
+
+// ===== CEO OFFICE FURNITURE =====
+// Big mahogany desk
+const rdt=new THREE.Mesh(new THREE.BoxGeometry(3,.1,1.4),gM(0x6B3A2A));
+rdt.position.set(6,.75,5);rdt.castShadow=true;scene.add(rdt);
+sG(5,5,2);sG(6,5,2);sG(7,5,2);
+// CEO monitor
+const rdm=new THREE.Mesh(new THREE.BoxGeometry(.8,.5,.06),gM(0x111111));
+rdm.position.set(6,1.15,4.5);scene.add(rdm);
+// Executive chair
+const echr=new THREE.Mesh(new THREE.BoxGeometry(.6,.08,.6),gM(0x333333));
+echr.position.set(6,.5,6);scene.add(echr);
+const ecbk=new THREE.Mesh(new THREE.BoxGeometry(.6,.7,.08),gM(0x222222));
+ecbk.position.set(6,.85,6.3);scene.add(ecbk);
+// Guest chairs
+const gc1=new THREE.Mesh(new THREE.BoxGeometry(.5,.4,.5),gM(0x884422));
+gc1.position.set(4,.2,3.5);scene.add(gc1);
+const gc2=new THREE.Mesh(new THREE.BoxGeometry(.5,.4,.5),gM(0x884422));
+gc2.position.set(8,.2,3.5);scene.add(gc2);
+// Bookshelf
+const bshelf=new THREE.Mesh(new THREE.BoxGeometry(.5,2.5,1.5),gM(0x7A5030));
+bshelf.position.set(1.5,1.25,2);scene.add(bshelf);
+// Flag
+const flagP=new THREE.Mesh(new THREE.BoxGeometry(.06,2.8,.06),gM(0xCCCCCC));
+flagP.position.set(10.5,1.4,2);scene.add(flagP);
+const flag2=new THREE.Mesh(new THREE.BoxGeometry(.9,.55,.02),gM(0xFF4444));
+flag2.position.set(10.9,2.5,2);scene.add(flag2);
+// Sofa
+const csofa=new THREE.Mesh(new THREE.BoxGeometry(2.5,.45,.7),gM(0x664422));
+csofa.position.set(6,.22,7.5);scene.add(csofa);
+const csofb=new THREE.Mesh(new THREE.BoxGeometry(2.5,.4,.1),gM(0x553311));
+csofb.position.set(6,.5,7.85);scene.add(csofb);
+
+// ===== MEETING ROOM FURNITURE =====
+// Long conference table
+const mtbl=new THREE.Mesh(new THREE.BoxGeometry(8,.08,2.5),gM(0x7A5030));
+mtbl.position.set(18.5,.72,4.5);scene.add(mtbl);
+// Meeting table area (walkable)
+// Chairs around table
+for(let i=0;i<4;i++){
+  const mc1=new THREE.Mesh(new THREE.BoxGeometry(.45,.06,.45),gM(0x555555));
+  mc1.position.set(15.5+i*2,.45,3);scene.add(mc1);
+  const mc2=new THREE.Mesh(new THREE.BoxGeometry(.45,.06,.45),gM(0x555555));
+  mc2.position.set(15.5+i*2,.45,6);scene.add(mc2);
+}
+// Whiteboard
+const wbd=new THREE.Mesh(new THREE.BoxGeometry(4,1.8,.1),gM(0xF5F5F5));
+wbd.position.set(18.5,2,1.3);scene.add(wbd);
+// Projector screen
+const proj=new THREE.Mesh(new THREE.BoxGeometry(.3,.2,.3),gM(0x888888));
+proj.position.set(18.5,3.2,1.5);scene.add(proj);
+
+// ===== MEDICAL ROOM =====
+// Bed 1
+const medB1=new THREE.Mesh(new THREE.BoxGeometry(2,.35,.9),gM(0xEEEEEE));
+medB1.position.set(29,.175,3.5);medB1.castShadow=true;scene.add(medB1);
+const rc1=new THREE.Mesh(new THREE.BoxGeometry(.5,.04,.12),gM(0xFF0000));rc1.position.set(29,.38,3.5);scene.add(rc1);
+const rc2=new THREE.Mesh(new THREE.BoxGeometry(.12,.04,.5),gM(0xFF0000));rc2.position.set(29,.38,3.5);scene.add(rc2);
+// Bed 2
+const medB2=new THREE.Mesh(new THREE.BoxGeometry(2,.35,.9),gM(0xEEEEEE));
+medB2.position.set(29,.175,6);medB2.castShadow=true;scene.add(medB2);
+const rc3=new THREE.Mesh(new THREE.BoxGeometry(.5,.04,.12),gM(0xFF0000));rc3.position.set(29,.38,6);scene.add(rc3);
+const rc4=new THREE.Mesh(new THREE.BoxGeometry(.12,.04,.5),gM(0xFF0000));rc4.position.set(29,.38,6);scene.add(rc4);
+// Medicine cabinet
+const mcab=new THREE.Mesh(new THREE.BoxGeometry(.5,1.5,.4),gM(0xDDDDDD));
+mcab.position.set(26.5,.75,2);scene.add(mcab);
+// Curtain divider
+const curt=new THREE.Mesh(new THREE.BoxGeometry(5,.02,.08),gM(0xAABBCC));
+curt.position.set(29,2,4.8);scene.add(curt);
+// IV stand
+const iv1=new THREE.Mesh(new THREE.BoxGeometry(.05,1.8,.05),gM(0xCCCCCC));
+iv1.position.set(28,.9,3);scene.add(iv1);
+
+
+
+// ===== GYM (x:1-10, z:20-26) =====
+// Treadmill
+const tread=new THREE.Mesh(new THREE.BoxGeometry(1,1.2,.5),gM(0x555555));
+tread.position.set(3,.6,26);tread.castShadow=true;scene.add(tread);sG(3,26,3);
+// Weights
+const wt=new THREE.Mesh(new THREE.BoxGeometry(.8,1.5,.5),gM(0x555555));
+wt.position.set(6,.75,26);wt.castShadow=true;scene.add(wt);sG(6,26,3);
+// Bench press
+const bp=new THREE.Mesh(new THREE.BoxGeometry(1.5,.45,.6),gM(0x444444));
+bp.position.set(4.5,.22,29);bp.castShadow=true;scene.add(bp);sG(4,29,3);sG(5,29,3);
+// Yoga mat
+const ym=new THREE.Mesh(new THREE.BoxGeometry(1.5,.03,.8),gM(0x66AACC));
+ym.position.set(8,.02,26);scene.add(ym);
+// Mirror wall
+const mir=new THREE.Mesh(new THREE.BoxGeometry(8,.02,2.5),new THREE.MeshLambertMaterial({color:0xDDEEFF,transparent:true,opacity:0.3}));
+mir.position.set(5,1.5,24.2);mir.rotation.x=Math.PI/2;scene.add(mir);
+
+// ===== REST/TEA AREA =====
+// Sofas
+const rsof1=new THREE.Mesh(new THREE.BoxGeometry(2.2,.45,.7),gM(0x7766AA));
+rsof1.position.set(15,.22,26);scene.add(rsof1);
+const rsofb1=new THREE.Mesh(new THREE.BoxGeometry(2.2,.35,.1),gM(0x6655AA));
+rsofb1.position.set(15,.48,26.35);scene.add(rsofb1);
+const rsof2=new THREE.Mesh(new THREE.BoxGeometry(2.2,.45,.7),gM(0x7766AA));
+rsof2.position.set(19,.22,26);scene.add(rsof2);
+const rsofb2=new THREE.Mesh(new THREE.BoxGeometry(2.2,.35,.1),gM(0x6655AA));
+rsofb2.position.set(19,.48,26.35);scene.add(rsofb2);
+// Coffee table
+const ctbl=new THREE.Mesh(new THREE.BoxGeometry(1.5,.3,.7),gM(0x8B6240));
+ctbl.position.set(17,.15,26);scene.add(ctbl);
+// Water cooler
+const wc2=new THREE.Mesh(new THREE.BoxGeometry(.4,1.2,.35),gM(0xCCCCCC));
+wc2.position.set(13,.6,25);scene.add(wc2);sG(13,25,3);
+const wb2=new THREE.Mesh(new THREE.BoxGeometry(.22,.35,.22),new THREE.MeshLambertMaterial({color:0x88CCFF,transparent:true,opacity:.6}));
+wb2.position.set(13,1.35,25);scene.add(wb2);
+// Vending machine
+const vm=new THREE.Mesh(new THREE.BoxGeometry(.6,1.6,.5),gM(0x333366));
+vm.position.set(21,.8,25);scene.add(vm);sG(21,25,3);
+const vms=new THREE.Mesh(new THREE.BoxGeometry(.4,.6,.02),new THREE.MeshBasicMaterial({color:0x44AAFF}));
+vms.position.set(21,1,24.73);scene.add(vms);
+// Books/magazines
+const bk=new THREE.Mesh(new THREE.BoxGeometry(.8,.5,.4),gM(0xAA6633));
+bk.position.set(15,.25,29);scene.add(bk);
+
+// ===== ENTERTAINMENT AREA =====
+// Arcade machines
+for(let i=0;i<3;i++){
+  const a=new THREE.Mesh(new THREE.BoxGeometry(.7,1.7,.6),gM(0x333366));
+  a.position.set(26+i*2,.85,26);a.castShadow=true;scene.add(a);
+  const as=new THREE.Mesh(new THREE.BoxGeometry(.5,.4,.02),new THREE.MeshBasicMaterial({color:[0xFF4444,0x44FF44,0x4444FF][i]}));
+  as.position.set(26+i*2,1.2,25.68);scene.add(as);sG(26+i*2,26,3);
+}
+// Pool table
+const ptbl=new THREE.Mesh(new THREE.BoxGeometry(2.5,.12,1.5),gM(0x33AA55));
+ptbl.position.set(30,.82,29);ptbl.castShadow=true;scene.add(ptbl);
+sG(29,29,3);sG(30,29,3);sG(31,29,3);
+// Foosball
+const fb=new THREE.Mesh(new THREE.BoxGeometry(1.5,.1,1),gM(0x556633));
+fb.position.set(34,.82,26);scene.add(fb);sG(34,26,3);
+// Bean bags
+const bb1=new THREE.Mesh(new THREE.BoxGeometry(.7,.35,.7),gM(0xFF6644));
+bb1.position.set(33,.17,29);scene.add(bb1);
+const bb2=new THREE.Mesh(new THREE.BoxGeometry(.7,.35,.7),gM(0x44CC66));
+bb2.position.set(34.5,.17,29.5);scene.add(bb2);
+// Gaming TV
+const gtv=new THREE.Mesh(new THREE.BoxGeometry(2,.04,1.2),gM(0x111111));
+gtv.position.set(34,1.5,24.2);gtv.rotation.x=Math.PI/2-.1;scene.add(gtv);
+const gtvs=new THREE.Mesh(new THREE.BoxGeometry(1.8,.04,1),new THREE.MeshBasicMaterial({color:0x223388}));
+gtvs.position.set(34,1.5,24.22);gtvs.rotation.x=Math.PI/2-.1;scene.add(gtvs);
+
+// ===== SERVER ROOM EQUIPMENT =====
+mkSign('🖥️ 机房',42,3.2,1.5,'#336699',3.5);
+// Server racks
+for(let i=0;i<4;i++){
+  const rack=new THREE.Mesh(new THREE.BoxGeometry(.8,2.2,.6),gM(0x333344));
+  rack.position.set(39+i*2,1.1,3);rack.castShadow=true;scene.add(rack);
+  // Blinking lights
+  for(let j=0;j<5;j++){
+    const led=new THREE.Mesh(new THREE.BoxGeometry(.06,.06,.02),new THREE.MeshBasicMaterial({color:[0x00FF00,0x00FF00,0xFF8800,0x00FF00,0xFF0000][j]}));
+    led.position.set(39+i*2-.2+j*.1,.5+j*.35,2.68);scene.add(led);
+  }
+}
+// Network switch
+const nsw=new THREE.Mesh(new THREE.BoxGeometry(2,.15,.5),gM(0x222233));
+nsw.position.set(42,1,6);scene.add(nsw);
+// UPS
+const ups=new THREE.Mesh(new THREE.BoxGeometry(.6,1.2,.5),gM(0x222222));
+ups.position.set(45,.6,3);scene.add(ups);
+// AC unit
+const ac=new THREE.Mesh(new THREE.BoxGeometry(1.5,.3,.2),gM(0xDDDDDD));
+ac.position.set(42,2.8,1.3);scene.add(ac);
+// Cable tray (floor)
+const ct3=new THREE.Mesh(new THREE.BoxGeometry(6,.03,.3),gM(0xFFCC00));
+ct3.position.set(42,.01,4.5);scene.add(ct3);
+
+// Floor color for server room
+// (handled in floor render section)
+
+// ===== BATHROOM FIXTURES =====
+// Toilet stalls
+for(let i=0;i<3;i++){
+  const stall=new THREE.Mesh(new THREE.BoxGeometry(1.2,1.8,.08),gM(0xDDDDCC));
+  stall.position.set(40+i*2.5,.9,26);scene.add(stall);
+  const toilet=new THREE.Mesh(new THREE.BoxGeometry(.4,.4,.5),gM(0xEEEEEE));
+  toilet.position.set(40+i*2.5,.2,25.5);scene.add(toilet);
+}
+// Sinks
+for(let i=0;i<3;i++){
+  const sink=new THREE.Mesh(new THREE.BoxGeometry(.5,.1,.4),gM(0xEEEEEE));
+  sink.position.set(39.5+i*2,.75,29);scene.add(sink);
+  const mir2=new THREE.Mesh(new THREE.BoxGeometry(.5,.6,.04),new THREE.MeshLambertMaterial({color:0xCCDDEE,transparent:true,opacity:.5}));
+  mir2.position.set(39.5+i*2,1.4,29.3);scene.add(mir2);
+}
+// Hand dryer
+const dryer=new THREE.Mesh(new THREE.BoxGeometry(.3,.25,.15),gM(0xCCCCCC));
+dryer.position.set(45,1.2,29);scene.add(dryer);
+
+// ===== RECEPTION (near south entrance) =====
+// Reception counter
+const rcnt=new THREE.Mesh(new THREE.BoxGeometry(4,.9,.6),gM(0x8B6240));
+rcnt.position.set(24,.45,36);scene.add(rcnt);
+// ===== RECEPTION BACKDROP WALL =====
+// Main backdrop - marble-like
+const bdWall=new THREE.Mesh(new THREE.BoxGeometry(16,3.5,.2),
+  new THREE.MeshLambertMaterial({color:0xF5F0E8}));
+bdWall.position.set(24,1.75,33.2);scene.add(bdWall);
+// Gold accent strip
+const goldStrip=new THREE.Mesh(new THREE.BoxGeometry(16,.08,.22),
+  new THREE.MeshLambertMaterial({color:0xCCA852,emissive:0x443300}));
+goldStrip.position.set(24,2.8,33.2);scene.add(goldStrip);
+const goldStrip2=new THREE.Mesh(new THREE.BoxGeometry(16,.05,.22),
+  new THREE.MeshLambertMaterial({color:0xCCA852,emissive:0x443300}));
+goldStrip2.position.set(24,.6,33.2);scene.add(goldStrip2);
+// Company logo - 3D block letters "星辰科技"
+const logoCanvas=document.createElement('canvas');logoCanvas.width=1024;logoCanvas.height=300;
+const logoCtx=logoCanvas.getContext('2d');
+// Gradient background
+const lgrd=logoCtx.createLinearGradient(0,0,800,0);
+lgrd.addColorStop(0,'#0a0a1e');lgrd.addColorStop(0.5,'#0e1530');lgrd.addColorStop(1,'#0a0a1e');
+logoCtx.fillStyle=lgrd;logoCtx.fillRect(0,0,1024,300);
+// Border
+logoCtx.strokeStyle='#CCA852';logoCtx.lineWidth=4;logoCtx.strokeRect(10,10,1004,280);
+// Company name
+logoCtx.font='bold 72px sans-serif';logoCtx.textAlign='center';
+logoCtx.fillStyle='#FFD700';
+logoCtx.shadowColor='#FFD700';logoCtx.shadowBlur=20;
+// Big lobster logo
+logoCtx.font='100px sans-serif';
+logoCtx.fillText('⭐',512,120);
+logoCtx.shadowBlur=0;
+// Company name
+logoCtx.font='bold 52px sans-serif';logoCtx.fillStyle='#FFD700';
+logoCtx.shadowColor='#FFD700';logoCtx.shadowBlur=15;
+logoCtx.fillText('星辰科技',512,200);
+logoCtx.shadowBlur=0;
+// English
+logoCtx.font='18px sans-serif';logoCtx.fillStyle='#AABBCC';
+logoCtx.fillText('STARTECH · INNOVATION · GLOBAL REACH',512,250);
+const logoTex=new THREE.CanvasTexture(logoCanvas);
+const logoMesh=new THREE.Mesh(new THREE.BoxGeometry(10,.02,3),new THREE.MeshBasicMaterial({map:logoTex}));
+logoMesh.position.set(24,2.0,33.32);logoMesh.rotation.x=Math.PI/2;scene.add(logoMesh);
+
+// Side pillars - decorative columns
+[-7.5,7.5].forEach(ox=>{
+  const pillar=new THREE.Mesh(new THREE.BoxGeometry(.4,3.5,.4),
+    new THREE.MeshLambertMaterial({color:0xE8E0D0}));
+  pillar.position.set(24+ox,1.75,33.2);scene.add(pillar);
+  // Gold cap
+  const cap=new THREE.Mesh(new THREE.BoxGeometry(.55,.12,.55),
+    new THREE.MeshLambertMaterial({color:0xCCA852,emissive:0x332200}));
+  cap.position.set(24+ox,3.5,33.2);scene.add(cap);
+  // Gold base
+  const base=new THREE.Mesh(new THREE.BoxGeometry(.55,.12,.55),
+    new THREE.MeshLambertMaterial({color:0xCCA852,emissive:0x332200}));
+  base.position.set(24+ox,.06,33.2);scene.add(base);
+});
+
+// Backlit accent - warm glow behind logo
+const glow=new THREE.Mesh(new THREE.BoxGeometry(12,.02,3),
+  new THREE.MeshBasicMaterial({color:0xFFD700,transparent:true,opacity:0.08}));
+glow.position.set(24,2.0,33.35);glow.rotation.x=Math.PI/2;scene.add(glow);
+
+// Spot lights on backdrop
+const spotL=new THREE.PointLight(0xFFEECC,0.4,8);
+spotL.position.set(20,3.2,33.5);scene.add(spotL);
+const spotR=new THREE.PointLight(0xFFEECC,0.4,8);
+spotR.position.set(28,3.2,33.5);scene.add(spotR);
+
+// Floor logo - marble pattern in front of counter
+const floorLogo=document.createElement('canvas');floorLogo.width=256;floorLogo.height=256;
+const flCtx=floorLogo.getContext('2d');
+flCtx.fillStyle='#D8C8B0';flCtx.fillRect(0,0,256,256);
+flCtx.beginPath();flCtx.arc(128,128,100,0,Math.PI*2);
+flCtx.fillStyle='#C8B8A0';flCtx.fill();
+flCtx.beginPath();flCtx.arc(128,128,90,0,Math.PI*2);
+flCtx.strokeStyle='#AA9060';flCtx.lineWidth=3;flCtx.stroke();
+flCtx.font='bold 48px sans-serif';flCtx.fillStyle='#AA9060';flCtx.textAlign='center';
+flCtx.fillText('⭐',128,140);
+const flTex=new THREE.CanvasTexture(floorLogo);
+const flMesh=new THREE.Mesh(new THREE.PlaneGeometry(3,3),new THREE.MeshLambertMaterial({map:flTex,transparent:true}));
+flMesh.rotation.x=-Math.PI/2;flMesh.position.set(24,0.01,37.5);scene.add(flMesh);
+
+// Reception sign
+// 前台接待名牌已移除，由背景墙Logo代替
+// Visitor sofas
+const vsof1=new THREE.Mesh(new THREE.BoxGeometry(2.5,.4,.6),gM(0x6655AA));
+vsof1.position.set(18,.2,38);scene.add(vsof1);
+const vsof2=new THREE.Mesh(new THREE.BoxGeometry(2.5,.4,.6),gM(0x6655AA));
+vsof2.position.set(30,.2,38);scene.add(vsof2);
+// Welcome plants
+const wp1=new THREE.Mesh(new THREE.BoxGeometry(.4,.3,.4),gM(0x8B4513));wp1.position.set(21,.15,35);scene.add(wp1);
+const wp1t=new THREE.Mesh(new THREE.BoxGeometry(.55,.8,.55),gM(0x33AA33));wp1t.position.set(21,.65,35);scene.add(wp1t);
+const wp2=new THREE.Mesh(new THREE.BoxGeometry(.4,.3,.4),gM(0x8B4513));wp2.position.set(27,.15,35);scene.add(wp2);
+const wp2t=new THREE.Mesh(new THREE.BoxGeometry(.55,.8,.55),gM(0x33AA33));wp2t.position.set(27,.65,35);scene.add(wp2t);
+
+// ===== TRAINING AREA (lobby left, x:3-14, z:30-37) =====
+mkSign('📺 企业培训区',8,3.2,34,'#2255AA',4);
+// Big screen with business dashboard
+const trainTV=new THREE.Mesh(new THREE.BoxGeometry(7,.06,4),gM(0x111111));
+trainTV.position.set(8,2.5,34.2);trainTV.rotation.x=Math.PI/2-.05;scene.add(trainTV);
+// Screen content - animated dashboard
+const tvCanvas=document.createElement('canvas');tvCanvas.width=700;tvCanvas.height=400;
+const tvCtx=tvCanvas.getContext('2d');
+const tvTex=new THREE.CanvasTexture(tvCanvas);
+const trainTVs=new THREE.Mesh(new THREE.BoxGeometry(6.6,.06,3.6),new THREE.MeshBasicMaterial({map:tvTex}));
+trainTVs.position.set(8,2.5,34.22);trainTVs.rotation.x=Math.PI/2-.05;scene.add(trainTVs);
+
+function drawDashboard(){
+  const c=tvCtx;const w=700,h=400;
+  c.fillStyle='#0a1628';c.fillRect(0,0,w,h);
+  // Title
+  c.font='bold 22px sans-serif';c.fillStyle='#FFD700';c.textAlign='center';
+  c.fillText('⭐ 星辰科技 · 全球业务实时仪表盘',w/2,28);
+  // KPI boxes
+  const kpis=[
+    {l:'月营收',v:'¥'+((Math.random()*500+800)|0)+'万',c:'#55FF55'},
+    {l:'活跃用户',v:((Math.random()*50+120)|0)+'K',c:'#55CCFF'},
+    {l:'API调用',v:((Math.random()*900+100)|0)+'万/日',c:'#FFAA44'},
+    {l:'客户满意度',v:((Math.random()*5+94)|0)+'%',c:'#FF66AA'},
+  ];
+  kpis.forEach((k,i)=>{
+    const x=25+i*170,y=42;
+    c.fillStyle='rgba(255,255,255,0.08)';c.fillRect(x,y,155,55);
+    c.font='12px sans-serif';c.fillStyle='#888';c.textAlign='center';c.fillText(k.l,x+77,y+18);
+    c.font='bold 22px sans-serif';c.fillStyle=k.c;c.fillText(k.v,x+77,y+46);
+  });
+  // Revenue chart
+  c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(20,105,320,130);
+  c.font='12px sans-serif';c.fillStyle='#aaa';c.textAlign='left';c.fillText('📈 月度营收趋势',30,120);
+  c.strokeStyle='#55FF55';c.lineWidth=2;c.beginPath();
+  for(let i=0;i<12;i++){
+    const x=40+i*25,y=200-Math.sin(i*.5+Date.now()*.001)*30-Math.random()*10;
+    i===0?c.moveTo(x,y):c.lineTo(x,y);
+  }
+  c.stroke();
+  // Fill under
+  c.lineTo(315,230);c.lineTo(40,230);c.closePath();
+  c.fillStyle='rgba(85,255,85,0.1)';c.fill();
+  // Heatmap - global orders
+  c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(360,105,320,130);
+  c.font='12px sans-serif';c.fillStyle='#aaa';c.textAlign='left';c.fillText('🌍 全球订单热力图',370,120);
+  // World map dots
+  const regions=[
+    {n:'北美',x:420,y:160,s:12},{n:'欧洲',x:520,y:145,s:10},{n:'东亚',x:610,y:165,s:15},
+    {n:'东南亚',x:600,y:195,s:8},{n:'中东',x:545,y:175,s:6},{n:'南美',x:440,y:210,s:5},
+    {n:'非洲',x:510,y:200,s:4},{n:'澳洲',x:630,y:215,s:5},
+  ];
+  regions.forEach(r=>{
+    const intensity=Math.random();
+    const red=Math.floor(255*intensity),green=Math.floor(100*(1-intensity));
+    c.fillStyle='rgba('+red+','+green+',50,'+(0.3+intensity*0.5)+')';
+    c.beginPath();c.arc(r.x,r.y,r.s+Math.random()*4,0,Math.PI*2);c.fill();
+    c.font='9px sans-serif';c.fillStyle='#ccc';c.textAlign='center';c.fillText(r.n,r.x,r.y+r.s+10);
+  });
+  // Bot fleet status
+  c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(20,245,660,60);
+  c.font='12px sans-serif';c.fillStyle='#aaa';c.textAlign='left';c.fillText('🤖 AI Bot 舰队状态',30,262);
+  const bots2=['Center','Resource','Mail','Claw','Info','Marketing','CTO','Coder','Cooperate','ZnRun','GPT','Claude','Grok','Kiro','Fee','Video','Dating','RockB','Stock'];
+  bots2.forEach((b,i)=>{
+    const x=30+i*34,y=270;
+    c.fillStyle=Math.random()>.1?'#55FF55':'#FFAA44';
+    c.fillRect(x,y,28,20);
+    c.font='7px sans-serif';c.fillStyle='#000';c.textAlign='center';c.fillText(b.slice(0,4),x+14,y+13);
+  });
+  // Scrolling news ticker
+  c.fillStyle='rgba(0,0,0,0.5)';c.fillRect(20,315,660,25);
+  const news=['🔥 AI代理服务用户突破12万','📊 本月营收同比增长45%','🌏 东南亚市场订单激增','🤖 舰队扩编至21个Bot','💰 量化交易本周收益+8.3%','🎯 客户满意度创新高'];
+  const ni=Math.floor(Date.now()/3000)%news.length;
+  c.font='14px sans-serif';c.fillStyle='#FFD700';c.textAlign='center';c.fillText('📰 '+news[ni],350,333);
+  // Timestamp
+  c.font='10px sans-serif';c.fillStyle='#555';c.textAlign='right';
+  c.fillText('实时更新 '+new Date().toLocaleTimeString('zh-CN'),670,395);
+  
+  tvTex.needsUpdate=true;
+}
+setInterval(drawDashboard,2000);
+drawDashboard();
+// Training chairs (3 rows x 4)
+for(let row=0;row<3;row++)for(let col=0;col<4;col++){
+  const tc=new THREE.Mesh(new THREE.BoxGeometry(.45,.06,.45),gM(0x4466AA));
+  tc.position.set(4+col*2.5,.4,37+row*1.5);scene.add(tc);
+  const tcb=new THREE.Mesh(new THREE.BoxGeometry(.45,.35,.06),gM(0x335599));
+  tcb.position.set(4+col*2.5,.6,36.75+row*1.5);scene.add(tcb);
+}
+// Podium
+const podium=new THREE.Mesh(new THREE.BoxGeometry(.8,1,.6),gM(0x7A5030));
+podium.position.set(8,.5,35.5);scene.add(podium);
+
+// ===== INTERVIEW AREA (lobby right, x:30-44, z:30-37) =====
+mkSign('🤝 面试·接待区',37,3.2,34,'#AA5522',4);
+// Interview desks (3 sets)
+for(let i=0;i<3;i++){
+  const idsk=new THREE.Mesh(new THREE.BoxGeometry(1.8,.08,1),gM(0xB8956A));
+  idsk.position.set(33+i*4.5,.72,37);scene.add(idsk);
+  // Interviewer chair
+  const ic1=new THREE.Mesh(new THREE.BoxGeometry(.45,.06,.45),gM(0x555555));
+  ic1.position.set(33+i*4.5,.4,36);scene.add(ic1);
+  // Candidate chair
+  const ic2=new THREE.Mesh(new THREE.BoxGeometry(.45,.06,.45),gM(0x888888));
+  ic2.position.set(33+i*4.5,.4,38);scene.add(ic2);
+}
+// Waiting area
+const wsof1=new THREE.Mesh(new THREE.BoxGeometry(3,.4,.6),gM(0x668844));
+wsof1.position.set(37,.2,40.5);scene.add(wsof1);
+// Water dispenser for guests
+const gwc=new THREE.Mesh(new THREE.BoxGeometry(.35,1,.3),gM(0xCCCCCC));
+gwc.position.set(44,.5,35);scene.add(gwc);
+// Magazine rack
+const mgrk=new THREE.Mesh(new THREE.BoxGeometry(.4,.8,.3),gM(0xAA8855));
+mgrk.position.set(44,.4,40);scene.add(mgrk);
+
+// ===== VISITOR/INTERVIEWEE SYSTEM =====
+// Spawn visitors who come for interviews
+const VISITOR_NAMES=['张先生','李女士','王同学','赵先生','刘女士','陈同学','杨先生','周女士','吴同学','郑先生'];
+const visitors=[];
+function spawnVisitor(){
+  if(visitors.length>=3)return; // max 3 visitors at once
+  const g=new THREE.Group();
+  const vc=0x888888+Math.floor(Math.random()*0x444444);
+  // Head
+  const vh=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),gM(0xFFCC99));
+  vh.position.y=1.7;g.add(vh);
+  // Body
+  const vb=new THREE.Mesh(new THREE.BoxGeometry(.45,.65,.3),gM(vc));
+  vb.position.y=1.15;g.add(vb);
+  // Arms
+  const vaL=new THREE.Mesh(new THREE.BoxGeometry(.14,.55,.2),gM(vc));
+  vaL.position.set(-.32,1.15,0);g.add(vaL);
+  const vaR=new THREE.Mesh(new THREE.BoxGeometry(.14,.55,.2),gM(vc));
+  vaR.position.set(.32,1.15,0);g.add(vaR);
+  // Legs
+  const vlL=new THREE.Mesh(new THREE.BoxGeometry(.16,.55,.2),gM(0x333344));
+  vlL.position.set(-.1,.5,0);g.add(vlL);
+  const vlR=new THREE.Mesh(new THREE.BoxGeometry(.16,.55,.2),gM(0x333344));
+  vlR.position.set(.1,.5,0);g.add(vlR);
+  // Briefcase
+  const bc2=new THREE.Mesh(new THREE.BoxGeometry(.3,.25,.08),gM(0x554422));
+  bc2.position.set(.35,.7,.1);g.add(bc2);
+  // Name label
+  const vname=VISITOR_NAMES[Math.floor(Math.random()*VISITOR_NAMES.length)];
+  const vlc=document.createElement('canvas');vlc.width=256;vlc.height=48;
+  const vlx=vlc.getContext('2d');
+  vlx.font='bold 28px sans-serif';vlx.fillStyle='#FFAA00';vlx.textAlign='center';
+  vlx.strokeStyle='rgba(0,0,0,0.8)';vlx.lineWidth=4;
+  vlx.strokeText('🧑‍💼'+vname,128,34);vlx.fillText('🧑‍💼'+vname,128,34);
+  const vls=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(vlc),transparent:true}));
+  vls.scale.set(2.5,.6,1);vls.position.y=2.5;g.add(vls);
+
+  // Start at entrance
+  g.position.set(24,.2,RH);
+  scene.add(g);
+  const isInterview=Math.random()>.3;
+  const deskIdx=Math.floor(Math.random()*3);
+  const v={mesh:g,name:vname,state:'entering',vaL,vaR,vlL,vlR,
+    path:findPath(24,RH-1, isInterview?(33+deskIdx*4.5|0):8, isInterview?38:39),
+    pathIdx:0,speed:.06,timer:0,stateTimer:0,
+    type:isInterview?'interview':'training',deskX:isInterview?(33+deskIdx*4.5):8,
+    seatZ:isInterview?38:39};
+  visitors.push(v);
+  
+  if(isInterview){
+    logEvent('🧑‍💼 '+vname+' 来面试了','chat');
+    // Notify reception (linxia)
+    const linxia=chars.find(c=>c.userData.bot.id==='林夏');
+    if(linxia)showBubble(linxia,'有面试者来了，请跟我走',null,3000);
+  }else{
+    logEvent('🧑‍💼 '+vname+' 来参观培训','chat');
+    const xialong=chars.find(c=>c.userData.bot.id==='客服小助');
+    if(xialong)showBubble(xialong,'欢迎参观，请到培训区',null,3000);
+  }
+}
+
+// Visitor spawn timer
+let visitorTimer=0;
+
+// ===== PLANTS throughout =====
+[[1,9],[RW-2,9],[12,22],[24,22],[37,22],[1,19],[RW-2,19],[12,9],[24,9]].forEach(([x,z])=>{
+  if(gG(x,z)!==0)return;
+  const pot=new THREE.Mesh(new THREE.BoxGeometry(.35,.28,.35),gM(0x8B4513));
+  pot.position.set(x+.5,.14,z+.5);scene.add(pot);
+  const pl=new THREE.Mesh(new THREE.BoxGeometry(.5,.65,.5),gM(0x33AA33));
+  pl.position.set(x+.5,.61,z+.5);scene.add(pl);sG(x,z,3);
+});
+
+// ===== FARM ANIMALS =====
+function mkAnimal(type,x,z){
+  const g=new THREE.Group();
+  if(type==='cat'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.35,.25,.55),gM(0xFF8833));b.position.y=.3;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.28,.25,.25),gM(0xFF9944));h.position.set(0,.4,-.22);g.add(h);
+    const t=new THREE.Mesh(new THREE.BoxGeometry(.04,.04,.5),gM(0xFF8833));t.position.set(0,.3,.5);g.add(t);
+  }else if(type==='dog'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.35,.3,.6),gM(0xBB8844));b.position.y=.35;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.3,.28,.3),gM(0xAA7733));h.position.set(0,.45,-.3);g.add(h);
+    const t=new THREE.Mesh(new THREE.BoxGeometry(.06,.3,.06),gM(0xBB8844));t.position.set(0,.5,.3);t.rotation.x=-.5;g.add(t);
+  }else if(type==='pig'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.45,.35,.55),gM(0xFFAAAA));b.position.y=.3;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.3,.28,.22),gM(0xFFBBBB));h.position.set(0,.35,-.32);g.add(h);
+  }else if(type==='chicken'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.22,.25,.3),gM(0xFFFFFF));b.position.y=.3;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.15,.18,.15),gM(0xFFFFFF));h.position.set(0,.5,-.12);g.add(h);
+    const c2=new THREE.Mesh(new THREE.BoxGeometry(.08,.1,.04),gM(0xFF2222));c2.position.set(0,.6,-.12);g.add(c2);
+  }else if(type==='duck'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.22,.22,.32),gM(0xFFFF88));b.position.y=.25;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.16,.16,.16),gM(0xFFFF88));h.position.set(0,.42,-.12);g.add(h);
+  }else if(type==='cow'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.5,.45,.8),gM(0xEEEEEE));b.position.y=.5;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.35,.3,.25),gM(0xEEEEEE));h.position.set(0,.6,-.45);g.add(h);
+    const sp=new THREE.Mesh(new THREE.BoxGeometry(.2,.02,.25),gM(0x333333));sp.position.set(.1,.74,.1);g.add(sp);
+  }else if(type==='sheep'){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.45,.4,.6),gM(0xF5F5DC));b.position.y=.45;g.add(b);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.25,.25,.2),gM(0xDDDDBB));h.position.set(0,.5,-.35);g.add(h);
+  }
+  g.position.set(x,0,z);g.castShadow=true;
+  g.userData={type,baseX:x,baseZ:z,angle:Math.random()*Math.PI*2,speed:.008+Math.random()*.01,timer:0,range:3+Math.random()*3};
+  scene.add(g);return g;
+}
+const animals=[];
+// Left farm
+animals.push(mkAnimal('cat',5,RH+5));animals.push(mkAnimal('cat',8,RH+7));
+animals.push(mkAnimal('dog',3,RH+3));animals.push(mkAnimal('dog',9,RH+6));
+animals.push(mkAnimal('pig',6,RH+10));animals.push(mkAnimal('pig',4,RH+12));
+animals.push(mkAnimal('chicken',2,RH+8));animals.push(mkAnimal('chicken',3,RH+9));animals.push(mkAnimal('chicken',5,RH+11));
+// Right farm
+animals.push(mkAnimal('cow',38,RH+5));animals.push(mkAnimal('cow',42,RH+7));
+animals.push(mkAnimal('sheep',40,RH+9));animals.push(mkAnimal('sheep',44,RH+6));
+animals.push(mkAnimal('duck',35,RH+15));animals.push(mkAnimal('duck',37,RH+16));animals.push(mkAnimal('duck',36,RH+17));
+
+// ===== FISH POND =====
+const pondGeo=new THREE.BoxGeometry(10,.15,6);
+const pondMat=new THREE.MeshLambertMaterial({color:0x3388CC,transparent:true,opacity:0.7});
+const pond=new THREE.Mesh(pondGeo,pondMat);
+pond.position.set(24,-0.02,RH+22);pond.receiveShadow=true;scene.add(pond);
+// Pond border
+[[19,RH+19,10.2,.3,.3],[19,RH+25,10.2,.3,.3],[18.8,RH+22,.3,.3,6.2],[29.2,RH+22,.3,.3,6.2]].forEach(([x,z,w,h,d])=>{
+  const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),gM(0x886644));b.position.set(x,.1,z);scene.add(b);
+});
+mkSign('🐟 鱼塘',24,1.5,RH+18.5,'#3388CC',3);
+const fishes=[];
+for(let i=0;i<10;i++){
+  const fish=new THREE.Mesh(new THREE.BoxGeometry(.2,.08,.35),gM([0xFF6633,0xFFAA00,0xFF4444,0xFFFF00,0xFF8888][i%5]));
+  fish.position.set(20+Math.random()*8,.05,RH+20+Math.random()*4);scene.add(fish);
+  fishes.push({mesh:fish,baseX:20+Math.random()*8,baseZ:RH+20+Math.random()*4,phase:Math.random()*Math.PI*2,speed:.02+Math.random()*.02});
+}
+// Farm signs + fences
+mkSign('🐾 龙虾牧场',6,1.5,RH+2,'#886644',3.5);
+mkSign('🐑 牧场',42,1.5,RH+3,'#886644',3);
+for(let x=0;x<10;x++){
+  const fp=new THREE.Mesh(new THREE.BoxGeometry(.08,.5,.08),gM(0x8B6240));fp.position.set(x+1,.25,RH+1);scene.add(fp);
+}
+for(let x=36;x<RW;x++){
+  const fp=new THREE.Mesh(new THREE.BoxGeometry(.08,.5,.08),gM(0x8B6240));fp.position.set(x+.5,.25,RH+1);scene.add(fp);
+}
+
+// ============ A* PATHFINDING ============
+function findPath(sx,sz,ex,ez,ignoreWalls){
+  sx=Math.round(sx);sz=Math.round(sz);ex=Math.round(ex);ez=Math.round(ez);
+  sx=Math.max(0,Math.min(RW-1,sx));sz=Math.max(0,Math.min(RH-1,sz));
+  ex=Math.max(0,Math.min(RW-1,ex));ez=Math.max(0,Math.min(RH+30,ez));
+  const walkable=(x,z)=>{
+    if(ignoreWalls&&(z>=RH))return true; // outdoor
+    if(x<0||x>=RW)return false;
+    if(z<0)return false;
+    if(z>=28&&z<RH)return gG(x,z)===0||x>=1&&x<RW-1; // lobby + outdoor
+    if(z>=RH)return x>=0&&x<RW; // outdoor area
+    const v=gG(x,z);return v===0||v===2||v===3;
+  };
+  if(!walkable(ex,ez)){
+    for(let r=1;r<5;r++)for(let dx=-r;dx<=r;dx++)for(let dz=-r;dz<=r;dz++){
+      if(walkable(ex+dx,ez+dz)){ex+=dx;ez+=dz;r=99;break;}
+    }
+  }
+  const key=(x,z)=>x+','+z;
+  const open=[{x:sx,z:sz,g:0,f:0,p:null}];
+  const closed=new Set();const gs={};gs[key(sx,sz)]=0;
+  let it=0;
+  while(open.length&&it<2000){
+    it++;open.sort((a,b)=>a.f-b.f);
+    const c=open.shift();
+    if(c.x===ex&&c.z===ez){const p=[];let n=c;while(n){p.unshift({x:n.x,z:n.z});n=n.p;}return p;}
+    closed.add(key(c.x,c.z));
+    [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dz])=>{
+      const nx=c.x+dx,nz=c.z+dz;
+      if(closed.has(key(nx,nz))||!walkable(nx,nz))return;
+      const ng=c.g+1,k=key(nx,nz);
+      if(gs[k]!==undefined&&ng>=gs[k])return;
+      gs[k]=ng;
+      open.push({x:nx,z:nz,g:ng,f:ng+Math.abs(nx-ex)+Math.abs(nz-ez),p:c});
+    });
+  }
+  return [{x:sx,z:sz}];
+}
+
+// ============ BOT DATA ============
+const MOODS=['😊开心','😤烦躁','🤔思考','😴疲惫','🔥激情','😎自信','😰焦虑','😂搞笑','💪充实','🥱无聊'];
+const THOUGHTS=[
+  '今天效率不错','又一个bug，头大','希望今天不加班',
+  '架构设计挺优雅','报告写完了松口气','服务器扛过高峰了',
+  '啥时候涨工资','新功能上线了！','数据不对劲...',
+  '午饭吃什么呢','API延迟有点高','天气真好想摸鱼',
+  '要不要重构代码','老板心情不错','测试全绿！完美',
+  '隔壁组出事故了','文档没写完...','需求又改了',
+  '咖啡续命☕','肩膀好酸','这个需求不合理啊',
+  '今天KPI稳了','有人偷看我屏幕','下班去吃火锅',
+  '代码review好累','又要开会...','周末去哪玩',
+  '股票涨了没','这个设计太丑了','终于调通了！',
+  '谁动了我的代码','加班费呢？','灵感来了！',
+  '困了想睡觉😴','老板走了没','隔壁在吵什么',
+  '要不要跳槽','这个方案绝了','又被催进度了',
+  '摸鱼中...别看我','空调太冷了','肚子饿了🍔',
+  '明天就周末了','突然想家了','奶茶续命🧋',
+  '这代码谁写的！','服务又挂了','今天心情不错',
+];
+const FIGHT_REASONS=['代码风格','接口设计','资源分配','Bug归属','方案选择','排期冲突'];
+const PRAISE_WORDS=['干得漂亮！','这个方案很优秀','效率很高，继续保持','你的思路很好','表现突出！'];
+const CRITICIZE_WORDS=['这个需要改进','注意一下质量','速度还可以再快','这个方案有问题','要认真对待'];
+
+const BOTS=[
+  {id:'运营中心',n:'小陈·中控',f:'小陈·中控',h:'员工01',c:0xFF4444,ht:0xCC0000,r:'中枢调度·全局监控',title:'行政主管'},
+  {id:'资源管理',n:'小赵·资源',f:'小赵·资源',h:'员工02',c:0x44AA44,ht:0x228822,r:'预算·资源管理',title:'资源总监'},
+  {id:'邮件助手',n:'小孙·邮件',f:'小孙·邮件',h:'员工03',c:0x4488CC,ht:0x2266AA,r:'邮件监控·告警',title:'通讯主管'},
+  {id:'社区治理',n:'小龙·社区',f:'小龙·社区',h:'员工04',c:0x44CCCC,ht:0x22AAAA,r:'AI自治社区',title:'社区总监'},
+  {id:'市场情报',n:'小鹰·情报',f:'小鹰·情报',h:'员工05',c:0xDDAA00,ht:0xBB8800,r:'全球商机情报',title:'情报主管'},
+  {id:'营销推广',n:'小马·营销',f:'小马·营销',h:'员工06',c:0xFF8844,ht:0xDD6622,r:'营销推广',title:'企划主管'},
+  {id:'技术总监',n:'老钱·技术',f:'老钱·技术',h:'员工07',c:0x00CCDD,ht:0x00AABB,r:'逆向工程·架构评审',title:'技术总监',isNew:true},
+  {id:'量化开发',n:'小码·开发',f:'小码·开发',h:'员工08',c:0x33CC33,ht:0x22AA22,r:'全栈开发',title:'首席工程师'},
+  {id:'调优专家',n:'小吴·调教',f:'小吴·调教',h:'员工09',c:0xAA44CC,ht:0x8822AA,r:'AI调教',title:'调教专家',isNew:true},
+  {id:'平台运维',n:'小周·蒸馏',f:'小周·蒸馏',h:'员工10',c:0x6666CC,ht:0x4444AA,r:'模型蒸馏',title:'智能研究员'},
+  {id:'跨模态',n:'老王·智算',f:'老王·智算',h:'员工13',c:0xCC6644,ht:0xAA4422,r:'GPT代理',title:'接口主管'},
+  {id:'模型代理',n:'老李·推理',f:'老李·推理',h:'员工14',c:0x4466CC,ht:0x2244AA,r:'Claude代理',title:'接口主管'},
+  {id:'接口服务',n:'老张·解析',f:'老张·解析',h:'员工15',c:0x444444,ht:0x44FF44,r:'Grok代理',title:'接口主管'},
+  {id:'开发接口',n:'小刘·接口',f:'小刘·接口',h:'员工16',c:0x2288DD,ht:0x44AAFF,r:'Kiro代理',title:'接口工程师',isNew:true},
+  {id:'模型计费',n:'小费·计费',f:'小费·计费',h:'员工17',c:0x22AA66,ht:0x008844,r:'成本核算',title:'财务经理'},
+  {id:'视频制作',n:'小影·视频',f:'小影·视频',h:'员工11',c:0xCC4488,ht:0xAA2266,r:'AI视频',title:'视频总监'},
+  {id:'社交运营',n:'小月·恋爱',f:'小月·恋爱',h:'员工12',c:0xFF66AA,ht:0xDD4488,r:'AI社交',title:'社交总监'},
+  {id:'安全总监',n:'小盾·安全',f:'小盾·安全',h:'员工22',c:0xFF4444,ht:0xCC2222,r:'安全防护',title:'安全总监',isNew:true},
+  {id:'加密投研',n:'老金·币圈',f:'老金·币圈',h:'员工18',c:0xFFD700,ht:0xCC9900,r:'币安量化',title:'交易总监'},
+  {id:'订单管理',n:'小韩·A股',f:'小韩·A股',h:'员工19',c:0xFF4444,ht:0xCC2222,r:'A股量化',title:'首席分析师'},
+  {id:'front01',n:'小美',f:'小美',h:'前台',c:0xFFB6C1,ht:0xFF69B4,r:'谁稀罕你啊😤',title:'前台接待',persona:true},
+  {id:'客服小助',n:'小龙',f:'小龙',h:'客服',c:0x88CC44,ht:0x66AA22,r:'社区客服',title:'客服专员',persona:true},
+];
+const ROCKER={id:'boss',n:'洛克',f:'洛克',h:'@rkstylego',c:0xFF6B35,ht:0xFFD700,r:'总指挥',title:'星辰科技CEO',is张总:true};
+
+// Character creation
+function mkChar(bot){
+  const g=new THREE.Group();
+  const bc=new THREE.Color(bot.c),hc=new THREE.Color(bot.ht);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.65,.65,.65),gM(0xFFCC99));
+  head.position.y=1.95;head.castShadow=true;g.add(head);
+  const hat=new THREE.Mesh(new THREE.BoxGeometry(.72,.18,.72),new THREE.MeshLambertMaterial({color:hc}));
+  hat.position.set(0,2.35,0);g.add(hat);
+  const em=new THREE.MeshBasicMaterial({color:0x333333});
+  const eL=new THREE.Mesh(new THREE.BoxGeometry(.1,.1,.02),em);eL.position.set(-.14,1.98,-.33);g.add(eL);
+  const eR=new THREE.Mesh(new THREE.BoxGeometry(.1,.1,.02),em);eR.position.set(.14,1.98,-.33);g.add(eR);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.58,.82,.38),new THREE.MeshLambertMaterial({color:bc}));
+  body.position.y=1.3;body.castShadow=true;g.add(body);
+  const am=new THREE.MeshLambertMaterial({color:bc.clone().multiplyScalar(.85)});
+  const aL=new THREE.Mesh(new THREE.BoxGeometry(.2,.7,.26),am);aL.position.set(-.4,1.3,0);g.add(aL);
+  const aR=new THREE.Mesh(new THREE.BoxGeometry(.2,.7,.26),am);aR.position.set(.4,1.3,0);g.add(aR);
+  const lm=new THREE.MeshLambertMaterial({color:bc.clone().multiplyScalar(.55)});
+  const lL=new THREE.Mesh(new THREE.BoxGeometry(.24,.7,.26),lm);lL.position.set(-.14,.6,0);g.add(lL);
+  const lR=new THREE.Mesh(new THREE.BoxGeometry(.24,.7,.26),lm);lR.position.set(.14,.6,0);g.add(lR);
+  if(bot.is张总){
+    const cm=new THREE.MeshLambertMaterial({color:0xFFD700,emissive:0x554400});
+    const cb=new THREE.Mesh(new THREE.BoxGeometry(.82,.12,.82),cm);cb.position.set(0,2.55,0);g.add(cb);
+    [-.12,0,.12].forEach(cx=>{const sp=new THREE.Mesh(new THREE.BoxGeometry(.11,.18,.11),cm);sp.position.set(cx,2.7,0);g.add(sp);});
+  }
+  if(bot.is张总){g.scale.set(1.5,1.5,1.5);}
+  if(bot.isNew){const gw=new THREE.Mesh(new THREE.BoxGeometry(.85,.12,.85),new THREE.MeshBasicMaterial({color:0x55FF55,transparent:true,opacity:.4}));gw.position.y=2.6;gw.name='glow';g.add(gw);}
+
+  // Name + title label
+  const lc=document.createElement('canvas');lc.width=512;lc.height=120;
+  const lx=lc.getContext('2d');
+  lx.font='bold 44px sans-serif';const nw=lx.measureText(bot.n).width;lx.font='32px sans-serif';const tw2=lx.measureText('【'+(bot.title||'')+'】').width;const mw=Math.max(nw,tw2)+30;const ox=(512-mw)/2;lx.fillStyle='rgba(0,0,0,.7)';lx.beginPath();lx.roundRect(ox,5,mw,105,12);lx.fill();
+  lx.font='bold 44px sans-serif';
+  lx.fillStyle=bot.is张总?'#FFD700':(bot.persona?'#FF69B4':'#55FF55');
+  lx.textAlign='center';lx.fillText(bot.n,256,46);
+  lx.font='bold 34px sans-serif';lx.fillStyle='#FFCC44';
+  lx.fillText('【'+( bot.title||'')+'】',256,90);
+  const ls=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(lc),transparent:true}));
+  ls.scale.set(7,1.8,1);ls.position.y=3.2;g.add(ls);
+
+  const dp=DP[bot.id]||(bot.is张总?{x:6,z:4}:{x:8,z:16});
+  g.position.set(dp.x+.5,.2,dp.z+1.2);
+  g.userData={bot,aL,aR,lL,lR,head,
+    deskX:dp.x+.5,deskZ:dp.z+1.2,
+    path:[],pathIdx:0,state:'working',stateTimer:60+Math.random()*100,
+    speed:.08,mood:MOODS[Math.floor(Math.random()*MOODS.length)],
+    thought:THOUGHTS[Math.floor(Math.random()*THOUGHTS.length)],
+    moodTimer:300+Math.random()*300,
+    interactWith:null,interactType:null,interactTimer:0,interactDialogue:'',
+  };
+  return g;
+}
+
+const chars=[];
+[...BOTS,ROCKER].forEach(b=>{const c=mkChar(b);scene.add(c);chars.push(c);});
+
+// ============ BUBBLE SYSTEM ============
+function mkBubble(text,color){
+  const c=document.createElement('canvas');c.width=512;c.height=64;
+  const x=c.getContext('2d');
+  x.font='bold 44px sans-serif';
+  x.fillStyle=color||'#FFFFFF';
+  x.textAlign='center';
+  x.strokeStyle='rgba(0,0,0,0.8)';x.lineWidth=5;
+  x.strokeText(text.slice(0,16),256,46);
+  x.fillText(text.slice(0,16),256,46);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true}));
+  s.scale.set(5,0.7,1);s.name='bubble';
+  return s;
+}
+
+function showBubble(ch,text,color,dur){
+  const old=ch.children.find(c=>c.name==='bubble');if(old)ch.remove(old);
+  const b=mkBubble(text,color);b.position.y=5.0;ch.add(b);
+  setTimeout(()=>{if(ch.children.includes(b))ch.remove(b);},dur||3000);
+}
+
+// ============ EVENT LOG ============
+const eventLog=document.getElementById('event-log');
+function logEvent(text,cls){
+  const d=document.createElement('div');d.className='ev '+(cls||'');
+  d.innerHTML='<span class="t">'+new Date().toLocaleTimeString('zh-CN')+'</span> '+text;
+  eventLog.prepend(d);
+  if(eventLog.children.length>50)eventLog.lastChild.remove();
+}
+function toggleLog(){eventLog.style.display=eventLog.style.display==='none'?'block':'none';}
+
+// ============ SOCIAL INTERACTIONS ============
+const DESTS=[
+  {n:'饮水机',x:13,z:25},{n:'休息区',x:17,z:26},{n:'健身房',x:5,z:23},
+  {n:'会议室',x:18,z:4},{n:'娱乐区',x:30,z:23},{n:'卫生间',x:41,z:27},
+];
+
+function startInteraction(ch1,ch2,type){
+  const u1=ch1.userData,u2=ch2.userData;
+  u1.interactWith=ch2;u1.interactType=type;u1.interactTimer=120+Math.random()*80;
+  u2.interactWith=ch1;u2.interactType=type;u2.interactTimer=u1.interactTimer;
+  u1.state='interacting';u2.state='interacting';
+  // Ensure minimum distance between interacting characters
+  const dx=ch2.position.x-ch1.position.x,dz=ch2.position.z-ch1.position.z;
+  const dist=Math.sqrt(dx*dx+dz*dz);
+  if(dist<1.5){
+    const nx=dx/(dist||1),nz=dz/(dist||1);
+    ch1.position.x-=nx*(1.5-dist)/2;ch1.position.z-=nz*(1.5-dist)/2;
+    ch2.position.x+=nx*(1.5-dist)/2;ch2.position.z+=nz*(1.5-dist)/2;
+  }
+  ch1.rotation.y=Math.atan2(dx,dz);
+  ch2.rotation.y=Math.atan2(-dx,-dz);
+}
+
+function tickInteraction(ch){
+  const ud=ch.userData;
+  if(!ud.interactWith||ud.interactTimer<=0)return;
+  ud.interactTimer--;
+  const other=ud.interactWith.userData;
+  const phase=ud.interactTimer;
+
+  if(phase%30===0&&phase>0){
+    const type=ud.interactType;
+    if(type==='fight'){
+      const lines=['你这代码能看吗！','你自己写的更烂！','冷静，讲道理','我要找领导评理！','哼，走着瞧','别推我！','你动手试试！','啊！打人了！'];
+      showBubble(ch,lines[Math.floor(Math.random()*lines.length)],'#FF6666',2500);
+      ud.mood='😤烦躁';
+    }else if(type==='chat'){
+      const lines=['最近项目怎么样？','还行，就是有点忙','一起吃午饭？','好主意！','听说要加新功能'];
+      showBubble(ch,lines[Math.floor(Math.random()*lines.length)],null,2500);
+    }else if(type==='play'){
+      const lines=['来一局？','我肯定赢你！','再来一局！','你太厉害了','哈哈太好玩了'];
+      showBubble(ch,lines[Math.floor(Math.random()*lines.length)],'#66FF66',2500);
+      ud.mood='😊开心';
+    }else if(type==='praise'){
+      showBubble(ch,PRAISE_WORDS[Math.floor(Math.random()*PRAISE_WORDS.length)],'#FFD700',2500);
+      other.mood='😊开心';other.thought='被表扬了，开心！';
+    }else if(type==='criticize'){
+      showBubble(ch,CRITICIZE_WORDS[Math.floor(Math.random()*CRITICIZE_WORDS.length)],'#FFAA44',2500);
+      other.mood='😰焦虑';other.thought='被批评了，要改进...';
+    }else if(type==='tattle'){
+      const lines=['领导，他的代码有问题','那个方案不靠谱','他今天迟到了','我觉得应该换个方案'];
+      showBubble(ch,lines[Math.floor(Math.random()*lines.length)],'#CC99FF',2500);
+    }
+  }
+
+  if(ud.interactTimer<=0){
+    // After fight - chance of injury
+    if(ud.interactType==='fight'&&Math.random()<.35){
+      ud.state='injured';ud.injuredTimer=120;
+      ud.interactWith=null;ud.interactType=null;
+      showBubble(ch,'啊...受伤了😵','#FF4444',3000);
+      logEvent('💥 '+ud.bot.n+' 在争执中受伤倒地！','fight');
+      return;
+    }
+    ud.state='working';ud.stateTimer=40+Math.random()*80;
+    ud.interactWith=null;ud.interactType=null;
+    const dx=Math.round(ud.deskX),dz=Math.round(ud.deskZ);
+    ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),dx,dz);
+    ud.pathIdx=0;ud.state='returning';ud.stateTimer=300;
+  }
+}
+
+// ============ COMMANDS ============
+let globalMode='normal';
+window.cmdAssemble=function(){
+  globalMode='assemble';
+  logEvent('📢 <b>全体集合！出列！</b>','praise');
+  chars.forEach((ch,i)=>{
+    const ud=ch.userData;
+    ud.state='commanded';
+    const row=Math.floor(i/7),col=i%7;
+    const tx=12+col*3,tz=RH+3+row*3;
+    ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),tx,tz,true);
+    ud.pathIdx=0;ud.assemblePos={x:tx+.5,z:tz+.5};
+    ud.stateTimer=9999;
+  });
+  setTimeout(()=>{
+    chars.forEach(ch=>showBubble(ch,'星辰科技！','#FFD700',3000));
+    logEvent('⭐ 全体：<b>星辰科技，无所不能！</b>','praise');
+  },8000);
+};
+
+window.cmdExercise=function(){
+  globalMode='exercise';
+  logEvent('🏋️ <b>全体操练！</b>','praise');
+  chars.forEach((ch,i)=>{
+    const ud=ch.userData;
+    ud.state='commanded';
+    const row=Math.floor(i/7),col=i%7;
+    const tx=12+col*3,tz=RH+3+row*3;
+    ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),tx,tz,true);
+    ud.pathIdx=0;ud.assemblePos={x:tx+.5,z:tz+.5};
+    ud.exercisePhase=0;ud.stateTimer=9999;
+  });
+};
+
+window.cmdDismiss=function(){
+  globalMode='normal';
+  logEvent('🔔 <b>解散！回岗位工作！</b>','chat');
+  chars.forEach(ch=>{
+    const ud=ch.userData;
+    showBubble(ch,'收到！',null,1500);
+    const dx=Math.round(ud.deskX),dz=Math.round(ud.deskZ);
+    ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),dx,dz,true);
+    ud.pathIdx=0;ud.state='returning';ud.stateTimer=500;
+  });
+};
+
+window.cmdMeeting=function(){
+  globalMode='meeting';
+  logEvent('📋 <b>全体开会！</b>','chat');
+  chars.forEach((ch,i)=>{
+    const ud=ch.userData;
+    ud.state='commanded';
+    const row=Math.floor(i/5),col=i%5;
+    const tx=24+col,tz=26+row;
+    ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),tx,tz);
+    ud.pathIdx=0;ud.stateTimer=9999;
+  });
+};
+
+// ============ MAIN LOOP ============
+const raycaster=new THREE.Raycaster();const mouse=new THREE.Vector2();
+renderer.domElement.addEventListener('mousemove',e=>{
+  mouse.x=(e.clientX/innerWidth)*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;
+});
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+
+let frame=0;
+function animate(){
+  requestAnimationFrame(animate);frame++;controls.update();
+
+  chars.forEach(ch=>{
+    const ud=ch.userData;
+    ud.stateTimer--;
+
+    // Safety: reset if stuck too long
+    if(ud.stateTimer<-500&&ud.state!=='healing'&&ud.state!=='gaming'&&ud.state!=='gym'&&ud.state!=='in_meeting'){
+      ud.state='returning';
+      ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+      ud.pathIdx=0;ud.stateTimer=300;
+      ud.interactWith=null;ud.interactType=null;
+      ch.rotation.x=0;ch.rotation.z=0;ch.rotation.y=0;ch.position.y=.2;
+      ud.aL.rotation.x=0;ud.aR.rotation.x=0;ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ud.lL.rotation.x=0;ud.lR.rotation.x=0;
+    }
+    // Mood changes
+    ud.moodTimer--;
+    if(ud.moodTimer<=0){
+      ud.mood=MOODS[Math.floor(Math.random()*MOODS.length)];
+      ud.thought=THOUGHTS[Math.floor(Math.random()*THOUGHTS.length)];
+      ud.moodTimer=80+Math.random()*100;
+      if(Math.random()<.25)showBubble(ch,ud.mood.slice(0,2)+ud.thought.slice(0,12),null,4000);
+    }
+
+    // Interaction tick
+    if(ud.state==='interacting'){tickInteraction(ch);if(ud.interactTimer<-60){ud.state='working';ud.interactWith=null;ud.interactType=null;ud.stateTimer=50;}return;}
+
+    // Normal AI
+    if(ud.state==='working'&&ud.stateTimer<=0&&globalMode==='normal'){
+      // Limit concurrent wanderers
+      const wanderers=chars.filter(c=>{const s=c.userData.state;return s==='walking'||s==='go_gaming'||s==='gaming'||s==='go_gym'||s==='gym'||s==='go_meeting';}).length;
+      if(wanderers>=6){ud.stateTimer=100+Math.random()*150;}
+      else{
+      const r=Math.random();
+      const avail=chars.filter(c=>c!==ch&&(c.userData.state==='working'||c.userData.state==='walking'));
+      if(ud.bot.is张总&&r<.12&&avail.length){
+        // ROCKER: praise or criticize - go to office
+        const target=avail[Math.floor(Math.random()*avail.length)];
+        const isPraise=Math.random()>.4;
+        ud.state='summoning';ud.summonTarget=target;ud.summonType=isPraise?'praise':'criticize';
+        // Both walk to 张总's office (8,20)
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),5,4);
+        ud.pathIdx=0;ud.stateTimer=9999;
+        target.userData.state='summoned';target.userData.summonBy=ch;
+        target.userData.path=findPath(Math.round(target.position.x),Math.round(target.position.z),8,4);
+        target.userData.pathIdx=0;target.userData.stateTimer=9999;
+        showBubble(ch,target.userData.bot.n+'来我办公室','#FFD700',3000);
+        showBubble(target,isPraise?'老板找我？':'完了...老板找我','#FFAA44',3000);
+        logEvent('👑 洛克叫 '+target.userData.bot.n+' 去办公室'+(isPraise?'表扬':'批评'),'praise');
+      }else if(r<.05){
+        // Fight - can lead to injury
+        const nearby=avail.filter(c=>Math.abs(c.position.x-ch.position.x)<8&&Math.abs(c.position.z-ch.position.z)<8);
+        if(nearby.length){
+          const target=nearby[Math.floor(Math.random()*nearby.length)];
+          const reason=FIGHT_REASONS[Math.floor(Math.random()*FIGHT_REASONS.length)];
+          logEvent(ud.bot.n+' 和 '+target.userData.bot.n+' 因为<b>'+reason+'</b>吵起来了！','fight');
+          startInteraction(ch,target,'fight');return;
+        }
+      }else if(r<.15){
+        // Chat
+        if(avail.length){
+          const target=avail[Math.floor(Math.random()*avail.length)];
+          logEvent(ud.bot.n+' 找 '+target.userData.bot.n+' 聊天','chat');
+          startInteraction(ch,target,'chat');return;
+        }
+      }else if(r<.18){
+        // Tattle to 张总
+        const boss=chars.find(c=>c.userData.bot.is张总);
+        if(boss&&(boss.userData.state==='working'||boss.userData.state==='walking')&&!ud.bot.is张总){
+          logEvent(ud.bot.n+' 去找领导告状了','mood');
+          startInteraction(ch,boss,'tattle');return;
+        }
+      }else if(r<.28){
+        // GO TO ENTERTAINMENT - gaming for ~15 seconds
+        const gameSpot={x:26+Math.floor(Math.random()*4)*2,z:26+Math.random()*3};
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(gameSpot.x),Math.round(gameSpot.z));
+        ud.pathIdx=0;ud.state='go_gaming';ud.stateTimer=9999;
+        showBubble(ch,'玩一会🎮','#66FF66',2000);
+        logEvent(ud.bot.n+' 去娱乐室玩耍','play');
+      }else if(r<.38){
+        // GO TO GYM - workout for ~15 seconds
+        const gymSpot={x:3+Math.floor(Math.random()*3)*2,z:26+Math.floor(Math.random()*2)*2};
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(gymSpot.x),Math.round(gymSpot.z));
+        ud.pathIdx=0;ud.state='go_gym';ud.stateTimer=9999;
+        showBubble(ch,'去锻炼💪','#FFAA00',2000);
+        logEvent(ud.bot.n+' 去健身房锻炼','chat');
+      }else if(r<.44){
+        // MEETING - grab 2-4 people, go to meeting room
+        const meetPeople=avail.filter(c=>!c.userData.bot.is张总&&c.userData.state==='working').slice(0,Math.floor(Math.random()*2)+2);
+        if(meetPeople.length>=2){
+          ud.state='go_meeting';
+          ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),16,5);
+          ud.pathIdx=0;ud.stateTimer=9999;
+          ud.meetGroup=[ch,...meetPeople];
+          showBubble(ch,'开会！大家来','#88CCFF',2000);
+          logEvent(ud.bot.n+' 召集'+meetPeople.map(c=>c.userData.bot.n).join('、')+'开会','chat');
+          meetPeople.forEach((mp,i)=>{
+            mp.userData.state='go_meeting';
+            mp.userData.path=findPath(Math.round(mp.position.x),Math.round(mp.position.z),16+i*2,6);
+            mp.userData.pathIdx=0;mp.userData.stateTimer=9999;
+            mp.userData.meetGroup=ud.meetGroup;
+            showBubble(mp,'好的，来了','#88CCFF',1500);
+          });
+        }
+      }else if(r<.60){
+        // Simple facility visit
+        const simpleDests=[{n:'饮水机',x:13,z:25},{n:'休息区',x:17,z:26},{n:'卫生间',x:41,z:27},{n:'前台',x:24,z:37},{n:'走廊散步',x:5+Math.floor(Math.random()*38),z:9}];
+        const dest=simpleDests[Math.floor(Math.random()*simpleDests.length)];
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),dest.x,dest.z);
+        ud.pathIdx=0;ud.state='walking';ud.stateTimer=150+Math.random()*100;
+        showBubble(ch,dest.n==='饮水机'?'喝水💧':dest.n==='卫生间'?'上厕所🚻':dest.n==='走廊散步'?'溜达一下':dest.n+'~',null,2000);
+        logEvent(ud.bot.n+' 去'+dest.n,'chat');
+      }else if(r<.62){
+        // GO TO BATHROOM
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),41,27);
+        ud.pathIdx=0;ud.state='walking';ud.stateTimer=200+Math.random()*100;
+        showBubble(ch,'上厕所🚻',null,2000);
+        logEvent(ud.bot.n+' 去卫生间','chat');
+      }else if(r<.68){
+        // GO TO REST AREA - drink water, chill
+        const restSpots=[{x:15,z:26,t:'喝杯咖啡☕'},{x:19,z:26,t:'休息一会😌'},{x:13,z:25,t:'喝水💧'},{x:21,z:25,t:'买个饮料🥤'}];
+        const spot=restSpots[Math.floor(Math.random()*restSpots.length)];
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),spot.x,spot.z);
+        ud.pathIdx=0;ud.state='walking';ud.stateTimer=200+Math.random()*150;
+        showBubble(ch,spot.t,null,2000);
+        logEvent(ud.bot.n+' 去休息区','chat');
+      }else if(r<.72){
+        // GO TO FISH POND - feed fish
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),24,RH+19);
+        ud.pathIdx=0;ud.state='go_fishing';ud.stateTimer=9999;
+        showBubble(ch,'去喂鱼🐟',null,2000);
+        logEvent(ud.bot.n+' 去鱼塘喂鱼','play');
+      }else if(r<.76){
+        // GO TO FARM - tend animals
+        const farmSide=Math.random()>.5;
+        const fx=farmSide?40:5,fz=RH+6+Math.floor(Math.random()*5);
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),fx,fz);
+        ud.pathIdx=0;ud.state='go_farm';ud.stateTimer=9999;
+        showBubble(ch,farmSide?'去看牛羊🐑':'去喂小动物🐾',null,2000);
+        logEvent(ud.bot.n+(farmSide?' 去牧场放牧':' 去喂小动物'),'play');
+      }else if(r<.80){
+        // GO TO SERVER ROOM (tech bots)
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),41,4);
+        ud.pathIdx=0;ud.state='walking';ud.stateTimer=150+Math.random()*100;
+        showBubble(ch,'检查服务器🖥️',null,2000);
+        logEvent(ud.bot.n+' 去机房巡检','chat');
+      }else if(r<.84){
+        // Play with someone
+        if(avail.length){
+          const target=avail[Math.floor(Math.random()*avail.length)];
+          logEvent(ud.bot.n+' 拉 '+target.userData.bot.n+' 去玩','play');
+          startInteraction(ch,target,'play');return;
+        }
+      }else{
+        ud.stateTimer=100+Math.random()*200;
+        if(Math.random()<.4){ud.thought=THOUGHTS[Math.floor(Math.random()*THOUGHTS.length)];showBubble(ch,ud.mood.slice(0,2)+ud.thought.slice(0,12),null,3500);}
+      }
+      } // end wanderer limit
+    }else if(ud.state==='walking'&&ud.stateTimer<=0){
+      const dx=Math.round(ud.deskX),dz=Math.round(ud.deskZ);
+      ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),dx,dz);
+      ud.pathIdx=0;ud.state='returning';ud.stateTimer=400;
+    }
+
+    // Summoning - 张总 calls employee to office
+    if(ud.state==='summoning'&&ud.pathIdx>=ud.path.length){
+      const tgt=ud.summonTarget;
+      if(tgt&&tgt.userData.pathIdx>=tgt.userData.path.length){
+        // Both arrived at office - start extended interaction
+        const type=ud.summonType;
+        ud.state='office_meeting';tgt.userData.state='office_meeting';
+        ud.interactWith=tgt;tgt.userData.interactWith=ch;
+        ud.interactType=type;tgt.userData.interactType=type;
+        ud.interactTimer=600;tgt.userData.interactTimer=600; // ~10 seconds at 60fps
+        ud.officeMeetingPhase=0;tgt.userData.officeMeetingPhase=0;
+        // Face each other
+        ch.rotation.y=Math.PI;tgt.rotation.y=0;
+      }
+    }
+    if(ud.state==='summoned'&&ud.pathIdx>=ud.path.length){
+      // Wait for 张总
+    }
+
+    // Office meeting - extended praise/criticize with dialogue
+    if(ud.state==='office_meeting'&&ud.bot.is张总){
+      ud.interactTimer--;
+      // Only in CEO office
+      if(ch.position.x>12||ch.position.z>9){ud.interactTimer=0;}
+      const tgt=ud.interactWith;
+      const phase=Math.floor((600-ud.interactTimer)/60); // 0-9 phases
+      const isPraise=ud.interactType==='praise';
+      if(ud.interactTimer%60===30){
+        // 张总 speaks
+        const praiseLines=['最近工作表现很棒！','客户反馈非常好','这个项目做得不错','效率提升很明显','给你加鸡腿！','继续保持这个水准','我很欣赏你的态度','你是团队的骄傲','下个月考虑给你涨薪','优秀！非常优秀！'];
+        const critLines=['这个月KPI没达标','代码质量需要提高','客户投诉增加了','你最近状态不好','必须改进！听到没','这种错误不能再犯','给我写检讨报告','扣你这个月奖金','三天内给我改好','再这样考虑换岗'];
+        const lines=isPraise?praiseLines:critLines;
+        showBubble(ch,lines[phase%lines.length],isPraise?'#FFD700':'#FF4444',2500);
+      }
+      if(ud.interactTimer%60===0&&tgt){
+        // Employee responds
+        const pResp=['谢谢老板！','我会继续努力的','太开心了！','不负期望！','谢谢认可🥹'];
+        const cResp=['我会改的...','对不起老板','我马上整改','给我个机会','😰我知错了'];
+        const resp=isPraise?pResp:cResp;
+        showBubble(tgt,resp[phase%resp.length],isPraise?'#88FF88':'#FFAAAA',2500);
+        tgt.userData.mood=isPraise?'😊开心':'😰焦虑';
+        tgt.userData.thought=isPraise?'被老板表扬了，太开心了':'被老板批评了，心里不好受';
+      }
+      if(ud.interactTimer<=0){
+        // End meeting
+        ud.state='returning';tgt.userData.state='returning';
+        ud.interactWith=null;tgt.userData.interactWith=null;
+        ud.path=findPath(5,4,Math.round(ud.deskX),Math.round(ud.deskZ));ud.pathIdx=0;ud.stateTimer=300;
+        tgt.userData.path=findPath(8,4,Math.round(tgt.userData.deskX),Math.round(tgt.userData.deskZ));
+        tgt.userData.pathIdx=0;tgt.userData.stateTimer=300;
+        logEvent('👑 办公室'+(isPraise?'表扬':'批评')+'结束，'+tgt.userData.bot.n+(isPraise?'心花怒放':'垂头丧气'),'praise');
+      }
+    }
+
+    // Injured state - lying on ground at fight location
+    if(ud.state==='injured'){
+      ch.rotation.z=Math.PI/2;
+      ch.position.y=.1;
+      ud.injuredTimer--;
+      if(ud.injuredTimer<=0){
+        // Get up and walk to medical room
+        ch.rotation.z=0;ch.position.y=.2;
+        // Pick bed 1 (13.5,27) or bed 2 (13.5,29)
+        const bedZ=(!window._bed1Taken)?3:6;
+        if(bedZ===3)window._bed1Taken=ud.bot.id;else window._bed2Taken=ud.bot.id;
+        ud.healBedZ=bedZ;
+        ud.state='go_medical';
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),29,bedZ);
+        ud.pathIdx=0;ud.stateTimer=9999;
+        ud.mood='🤕受伤';ud.thought='好痛...要去医疗室';
+        showBubble(ch,'好痛...去医疗室😵','#FF8888',3000);
+        logEvent('🏥 '+ud.bot.n+' 被送往医疗室治疗','fight');
+      }
+    }
+    // Walking to medical
+    if(ud.state==='go_medical'&&ud.pathIdx>=ud.path.length){
+      ud.state='healing';
+      ud.healTimer=1200; // ~20 seconds at 60fps
+      ch.rotation.z=Math.PI/2; // Lie along bed
+      ch.position.y=.5;
+      showBubble(ch,'躺下休息...','#FFAAAA',2000);
+      logEvent('🛏️ '+ud.bot.n+' 躺在医疗室'+((ud.healBedZ===27)?'1':'2')+'号床','chat');
+      // 张总 ALWAYS visits injured employee
+      const boss=chars.find(c=>c.userData.bot.is张总);
+      if(boss){
+        const rk=boss;const injured=ch;const iname=ud.bot.n;
+        setTimeout(()=>{
+          if(rk.userData.state==='working'||rk.userData.state==='walking'||rk.userData.state==='returning'){
+            rk.userData.state='visiting';
+            rk.userData.visitTarget=injured;
+            rk.userData.path=findPath(Math.round(rk.position.x),Math.round(rk.position.z),28,ud.healBedZ);
+            rk.userData.pathIdx=0;rk.userData.stateTimer=9999;
+            showBubble(rk,'听说'+iname+'受伤了！','#FFD700',3000);
+            logEvent('👑 洛克赶去医疗室探望'+iname,'praise');
+          }
+        },2000);
+      }
+    }
+    // Healing in medical bed
+    if(ud.state==='healing'){
+      ch.rotation.x=Math.PI/2;ch.position.y=.5;
+      ud.healTimer--;
+      // Periodic moans
+      if(ud.healTimer%180===0&&ud.healTimer>0){
+        const moans=['好痛啊...','什么时候能好','想回去工作了','谢谢大家关心','啊...动不了'];
+        showBubble(ch,moans[Math.floor(Math.random()*moans.length)],'#FFAAAA',2500);
+      }
+      if(ud.healTimer<=0){
+        // Healed! Get up
+        ch.rotation.z=0;ch.position.y=.2;
+        ud.state='returning';
+        ud.mood='💪充实';ud.thought='终于好了！回去工作';
+        showBubble(ch,'痊愈了！回岗位💪','#66FF66',3000);
+        logEvent('✅ '+ud.bot.n+' 治疗完毕，精神焕发！','play');
+        if(ud.healBedZ===3)window._bed1Taken=null;else window._bed2Taken=null;
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=300;
+      }
+    }
+    // 张总 visiting injured
+    if(ud.state==='visiting'&&ud.pathIdx>=ud.path.length){
+      const tgt=ud.visitTarget;
+      if(tgt&&tgt.userData.state==='healing'){
+        ud.visitPhase=(ud.visitPhase||0)+1;
+        if(ud.visitPhase===1){
+          showBubble(ch,'怎么受伤了？严重吗？','#FFD700',3000);
+          ud.mood='😰焦虑';ud.thought='我的员工受伤了，心疼';
+        }
+        if(ud.visitPhase===60){
+          showBubble(tgt,'老板...我没事...','#FFAAAA',3000);
+          tgt.userData.mood='😊开心';tgt.userData.thought='老板亲自来看我，感动';
+        }
+        if(ud.visitPhase===120){
+          showBubble(ch,'好好休息，不要着急','#FFD700',3000);
+        }
+        if(ud.visitPhase===180){
+          showBubble(tgt,'谢谢老板关心🥹','#88FF88',3000);
+        }
+        if(ud.visitPhase===240){
+          showBubble(ch,'医药费公司报销','#FFD700',3000);
+          ud.mood='😊开心';ud.thought='关心员工是我的责任';
+        }
+        if(ud.visitPhase===300){
+          showBubble(tgt,'老板太好了！感动！','#88FF88',3000);
+          tgt.userData.mood='🔥激情';tgt.userData.thought='老板真好，以后加倍努力';
+        }
+        if(ud.visitPhase>=360){
+          showBubble(ch,'我先回去了，养好伤','#FFD700',3000);
+          ud.state='returning';ud.visitPhase=0;ud.visitTarget=null;
+          ud.mood='😊开心';
+          ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+          ud.pathIdx=0;ud.stateTimer=300;
+          logEvent('👑 洛克探望结束，'+tgt.userData.bot.n+'深受感动','praise');
+        }
+      }else{
+        // Target already healed
+        ud.state='returning';ud.visitPhase=0;ud.visitTarget=null;
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=300;
+      }
+    }
+
+    // FISHING activity
+    if(ud.state==='go_fishing'&&ud.pathIdx>=ud.path.length){
+      ud.state='fishing';ud.activityTimer=800; // ~13 seconds
+      showBubble(ch,'吃吧吃吧🐟',null,2500);
+    }
+    if(ud.state==='fishing'){
+      ud.activityTimer--;
+      const t2=frame*.05;
+      // Only animate near pond
+      if(ch.position.z<RH+16){ud.activityTimer=0;}
+      // Feeding motion - arm throwing
+      ud.aR.rotation.x=Math.sin(t2*2)*-.8;
+      ud.aL.rotation.x=Math.sin(t2)*.2;
+      ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ud.lL.rotation.x=0;ud.lR.rotation.x=0;
+      if(ud.activityTimer%200===0&&ud.activityTimer>0){
+        const words=['鱼儿快来吃','好多鱼啊','这条好大！','真可爱🐟','好治愈啊','心情变好了'];
+        showBubble(ch,words[Math.floor(Math.random()*words.length)],'#66CCFF',3000);
+      }
+      if(ud.activityTimer<=0){
+        ud.state='returning';
+        ud.mood='😊开心';ud.thought='喂完鱼心情好';
+        showBubble(ch,'喂完鱼了，回去干活😊',null,2000);
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=300;
+      }
+      return;
+    }
+
+    // FARM activity
+    if(ud.state==='go_farm'&&ud.pathIdx>=ud.path.length){
+      ud.state='farming';ud.activityTimer=800;
+      showBubble(ch,'乖乖，来吃饭🌾',null,2500);
+    }
+    if(ud.state==='farming'){
+      ud.activityTimer--;
+      const t2=frame*.05;
+      // Only animate in outdoor farm
+      if(ch.position.z<RH){ud.activityTimer=0;}
+      // Petting/feeding motion
+      ud.aL.rotation.x=Math.sin(t2*2)*-.6;
+      ud.aR.rotation.x=Math.sin(t2*2+1)*-.6;
+      ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ch.position.y=.2+Math.sin(t2)*.03; // Slight bobbing
+      if(ud.activityTimer%180===0&&ud.activityTimer>0){
+        const words=['好乖啊🐱','吃饱了没','毛好软','别跑！','来让我摸摸','小猪真胖😂','咩~🐑'];
+        showBubble(ch,words[Math.floor(Math.random()*words.length)],'#88DD66',3000);
+      }
+      if(ud.activityTimer<=0){
+        ud.state='returning';ch.position.y=.2;
+        ud.mood='😊开心';ud.thought='和小动物玩好开心';
+        showBubble(ch,'回去工作啦~',null,2000);
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=300;
+      }
+      return;
+    }
+
+    // GAMING activity
+    if(ud.state==='go_gaming'&&ud.pathIdx>=ud.path.length){
+      ud.state='gaming';ud.activityTimer=900; // ~15 seconds
+      showBubble(ch,'太好玩了！🎮','#66FF66',2000);
+    }
+    if(ud.state==='gaming'){
+      ud.activityTimer--;
+      const t2=frame*.1;
+      // Only animate in entertainment zone
+      if(ch.position.x<24||ch.position.x>36||ch.position.z<24||ch.position.z>31){ud.activityTimer=0;}
+      // Excited jumping and arm waving
+      ch.position.y=.2+Math.abs(Math.sin(t2*3))*.25;
+      ud.aL.rotation.x=Math.sin(t2*5)*.9;
+      ud.aR.rotation.x=Math.sin(t2*5+2)*.9;
+      ud.aL.rotation.z=Math.sin(t2*3)*.5;
+      ud.aR.rotation.z=-Math.sin(t2*3)*.5;
+      ud.lL.rotation.x=Math.sin(t2*4)*.3;
+      ud.lR.rotation.x=-Math.sin(t2*4)*.3;
+      ch.rotation.y+=.02;
+      if(ud.activityTimer%180===0&&ud.activityTimer>0){
+        const yells=['哈哈太好玩了！','再来一局！','我赢了！','不服再来！','爽！','手速太快了！'];
+        showBubble(ch,yells[Math.floor(Math.random()*yells.length)],'#66FF66',2500);
+      }
+      if(ud.activityTimer<=0){
+        ud.state='returning';ch.position.y=.2;
+        ud.aL.rotation.x=0;ud.aR.rotation.x=0;ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+        ud.lL.rotation.x=0;ud.lR.rotation.x=0;ch.rotation.y=0;
+        ud.mood='😊开心';ud.thought='玩够了，回去干活';
+        showBubble(ch,'玩够了，回去干活😊',null,2000);
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=300;
+      }
+      return;
+    }
+
+    // GYM activity
+    if(ud.state==='go_gym'&&ud.pathIdx>=ud.path.length){
+      ud.state='gym';ud.activityTimer=900; // ~15 seconds
+      ud.gymPhase=0;
+      showBubble(ch,'开始锻炼！💪','#FFAA00',2000);
+    }
+    if(ud.state==='gym'){
+      ud.activityTimer--;
+      ud.gymPhase+=.08;
+      // Only animate in gym zone
+      if(ch.position.x>11||ch.position.z<24||ch.position.z>31){ud.activityTimer=0;}
+      // Workout animation - squats + arm raises
+      const phase=ud.gymPhase;
+      ch.position.y=.2+Math.abs(Math.sin(phase))*.15;
+      ud.aL.rotation.x=-Math.abs(Math.sin(phase))*1.5;
+      ud.aR.rotation.x=-Math.abs(Math.sin(phase))*1.5;
+      ud.aL.rotation.z=Math.sin(phase)*.3;
+      ud.aR.rotation.z=-Math.sin(phase)*.3;
+      ud.lL.rotation.x=Math.sin(phase)*.4;
+      ud.lR.rotation.x=-Math.sin(phase)*.4;
+      if(ud.activityTimer%200===0&&ud.activityTimer>0){
+        const shouts=['嘿！嘿！','坚持！','再来十个！','燃烧卡路里🔥','出汗了！','感觉很棒！'];
+        showBubble(ch,shouts[Math.floor(Math.random()*shouts.length)],'#FFAA00',2500);
+      }
+      if(ud.activityTimer<=0){
+        ud.state='returning';ch.position.y=.2;
+        ud.aL.rotation.x=0;ud.aR.rotation.x=0;ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+        ud.lL.rotation.x=0;ud.lR.rotation.x=0;ch.rotation.y=0;
+        ud.mood='💪充实';ud.thought='锻炼完毕，精力充沛';
+        showBubble(ch,'锻炼完毕，精力充沛💪','#66FF66',2000);
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=300;
+      }
+      return;
+    }
+
+    // MEETING activity
+    if(ud.state==='go_meeting'&&ud.pathIdx>=ud.path.length){
+      // Check if all meeting members arrived
+      if(ud.meetGroup){
+        const allArrived=ud.meetGroup.every(c=>c.userData.pathIdx>=c.userData.path.length);
+        if(allArrived&&!ud.meetingStarted){
+          ud.meetingStarted=true;
+          ud.meetGroup.forEach(c=>{c.userData.state='in_meeting';c.userData.activityTimer=1200;}); // ~20 seconds
+          logEvent('📋 会议开始：'+ud.meetGroup.map(c=>c.userData.bot.n).join('、'),'chat');
+        }
+      }
+    }
+    if(ud.state==='in_meeting'){
+      ud.activityTimer--;
+      // Only in meeting room zone
+      if(ch.position.x<13||ch.position.x>24||ch.position.z>9){ud.activityTimer=0;}
+      // Sitting still, occasional head nod
+      ch.position.y=.15; // Sitting height
+      ud.aL.rotation.x=-.3;ud.aR.rotation.x=-.3; // Arms on table
+      ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ud.lL.rotation.x=-.8;ud.lR.rotation.x=-.8; // Legs bent
+      ud.head.rotation.y=Math.sin(frame*.03+ch.position.x)*.15;
+      if(ud.activityTimer%240===0&&ud.activityTimer>0){
+        const words=['我觉得可行','数据支持这个方案','预算够吗？','排期怎么安排','风险评估呢','同意！','我有不同意见','先试试看吧','这个需要再想想','目标明确了'];
+        showBubble(ch,words[Math.floor(Math.random()*words.length)],'#88CCFF',2500);
+      }
+      if(ud.activityTimer<=0){
+        ud.state='returning';ch.position.y=.2;
+        ud.aL.rotation.x=0;ud.aR.rotation.x=0;ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+        ud.lL.rotation.x=0;ud.lR.rotation.x=0;ch.rotation.x=0;ch.rotation.z=0;
+        ud.meetingStarted=false;ud.meetGroup=null;
+        ud.mood='🤔思考';ud.thought='会开完了，有新思路';
+        showBubble(ch,'散会！',null,1500);
+        ud.path=findPath(Math.round(ch.position.x),Math.round(ch.position.z),Math.round(ud.deskX),Math.round(ud.deskZ));
+        ud.pathIdx=0;ud.stateTimer=200;
+      }
+      return;
+    }
+
+    // Follow path
+    const moving=ud.state==='walking'||ud.state==='returning'||ud.state==='commanded'||ud.state==='summoning'||ud.state==='summoned'||ud.state==='go_medical'||ud.state==='visiting'||ud.state==='go_gaming'||ud.state==='go_gym'||ud.state==='go_meeting'||ud.state==='go_fishing'||ud.state==='go_farm';
+    if(moving&&ud.path.length>0&&ud.pathIdx<ud.path.length){
+      const tg=ud.path[ud.pathIdx];
+      const tx=tg.x+.5,tz=tg.z+.5;
+      const dx=tx-ch.position.x,dz=tz-ch.position.z;
+      const dist=Math.sqrt(dx*dx+dz*dz);
+      if(dist<.15){
+        ud.pathIdx++;
+        if(ud.pathIdx>=ud.path.length){
+          if(ud.state==='returning'){ud.state='working';ud.stateTimer=400+Math.random()*500;}
+          else if(ud.state==='commanded'){
+            if(ud.assemblePos){ch.position.x=ud.assemblePos.x;ch.position.z=ud.assemblePos.z;}
+            ch.rotation.y=0; // Face forward
+          }
+          else{ud.stateTimer=60+Math.random()*60;}
+        }
+      }else{
+        // Anti-clipping: strong collision avoidance
+        const nx=ch.position.x+dx/dist*ud.speed;
+        const nz=ch.position.z+dz/dist*ud.speed;
+        let blocked=false;
+        for(let oi=0;oi<chars.length;oi++){
+          const other=chars[oi];
+          if(other===ch||other.userData.state==='injured'||other.userData.state==='healing')continue;
+          const odx=nx-other.position.x,odz=nz-other.position.z;
+          const od=odx*odx+odz*odz;
+          if(od<0.7){blocked=true;break;}
+        }
+        if(!blocked){
+          ch.position.x=nx;ch.position.z=nz;
+          ud._stuckCount=0;
+        }else{
+          ud._stuckCount=(ud._stuckCount||0)+1;
+          if(ud._stuckCount>15){
+            // Try perpendicular dodge
+            const side=ud._stuckCount%2===0?1:-1;
+            const dodgeX=ch.position.x+(-dz/dist)*.12*side;
+            const dodgeZ=ch.position.z+(dx/dist)*.12*side;
+            let dodgeOk=true;
+            for(let oi=0;oi<chars.length;oi++){
+              if(chars[oi]===ch)continue;
+              const d2=(dodgeX-chars[oi].position.x)**2+(dodgeZ-chars[oi].position.z)**2;
+              if(d2<0.5){dodgeOk=false;break;}
+            }
+            if(dodgeOk){ch.position.x=dodgeX;ch.position.z=dodgeZ;}
+          }
+          if(ud._stuckCount>60){
+            // Reroute: find new path avoiding current area
+            const cx=Math.round(ch.position.x),cz=Math.round(ch.position.z);
+            const target=ud.path[ud.path.length-1];
+            if(target){
+              ud.path=findPath(cx,cz,target.x,target.z);
+              ud.pathIdx=0;
+            }
+            ud._stuckCount=0;
+          }
+        }
+        ch.rotation.y=Math.atan2(dx,dz);
+      }
+    }
+
+    // Exercise animation
+    if(globalMode==='exercise'&&ud.state==='commanded'&&ud.pathIdx>=ud.path.length){
+      ud.exercisePhase=(ud.exercisePhase||0)+.05;
+      // Jumping jacks
+      ch.position.y=.2+Math.abs(Math.sin(ud.exercisePhase*2))*.3;
+      ud.aL.rotation.z=Math.sin(ud.exercisePhase*2)*1.2;
+      ud.aR.rotation.z=-Math.sin(ud.exercisePhase*2)*1.2;
+      ud.lL.rotation.x=Math.sin(ud.exercisePhase*2)*.5;
+      ud.lR.rotation.x=-Math.sin(ud.exercisePhase*2)*.5;
+      return;
+    }
+
+    // Limb animation
+    const t=frame*.1;
+    if(moving&&ud.pathIdx<ud.path.length){
+      const sw=Math.sin(t*2)*.6;
+      ud.aL.rotation.x=sw;ud.aR.rotation.x=-sw;ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ud.lL.rotation.x=-sw*.7;ud.lR.rotation.x=sw*.7;
+      ch.position.y=.2+Math.abs(Math.sin(t*2))*.04;
+    }else if(ud.state==='office_meeting'){
+      // Office meeting pose
+      ud.aL.rotation.x=Math.sin(frame*.05)*.15;ud.aR.rotation.x=Math.sin(frame*.05+1)*.15;
+      ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ud.lL.rotation.x=0;ud.lR.rotation.x=0;
+      ch.position.y=.2;
+    }else if(ud.state==='interacting'){
+      // Animated talking/fighting
+      if(ud.interactType==='fight'){
+        ud.aL.rotation.x=Math.sin(t*4)*.8;ud.aR.rotation.x=-Math.sin(t*4)*.8;
+        ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+        ch.position.y=.2+Math.abs(Math.sin(t*3))*.06;
+      }else{
+        ud.aL.rotation.x=Math.sin(t*2)*.2;ud.aR.rotation.x=Math.sin(t*2+1)*.2;
+        ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      }
+      ud.lL.rotation.x=0;ud.lR.rotation.x=0;
+    }else{
+      ud.aL.rotation.x=Math.sin(t*3)*.12;ud.aR.rotation.x=Math.sin(t*3+1)*.12;
+      ud.aL.rotation.z=0;ud.aR.rotation.z=0;
+      ud.lL.rotation.x=0;ud.lR.rotation.x=0;
+      ud.head.rotation.y=Math.sin(t*.4)*.08;
+    }
+    const gw=ch.children.find(c=>c.name==='glow');
+    if(gw)gw.material.opacity=.3+Math.sin(t)*.2;
+  });
+
+
+  // Visitor spawning
+  visitorTimer++;
+  if(visitorTimer%600===0)spawnVisitor(); // Every ~10 seconds
+  
+  // Animate visitors
+  for(let vi=visitors.length-1;vi>=0;vi--){
+    const v=visitors[vi];
+    v.timer++;
+    if(v.state==='entering'&&v.path.length>0&&v.pathIdx<v.path.length){
+      const tg=v.path[v.pathIdx];
+      const tx=tg.x+.5,tz=tg.z+.5;
+      const dx3=tx-v.mesh.position.x,dz3=tz-v.mesh.position.z;
+      const dist3=Math.sqrt(dx3*dx3+dz3*dz3);
+      if(dist3<.2){v.pathIdx++;}
+      else{
+        v.mesh.position.x+=dx3/dist3*v.speed;
+        v.mesh.position.z+=dz3/dist3*v.speed;
+        v.mesh.rotation.y=Math.atan2(dx3,dz3);
+        const sw3=Math.sin(frame*.2)*.5;
+        v.vaL.rotation.x=sw3;v.vaR.rotation.x=-sw3;
+        v.vlL.rotation.x=-sw3*.6;v.vlR.rotation.x=sw3*.6;
+      }
+      if(v.pathIdx>=v.path.length){
+        v.state='seated';v.stateTimer=v.type==='interview'?900:1200; // 15-20 sec
+        const bubble=v.type==='interview'?'请多指教🙏':'好期待培训！';
+        const bc=document.createElement('canvas');bc.width=320;bc.height=48;
+        const bx=bc.getContext('2d');bx.font='bold 32px sans-serif';bx.fillStyle='#FFAA00';bx.textAlign='center';
+        bx.strokeStyle='rgba(0,0,0,0.8)';bx.lineWidth=4;bx.strokeText(bubble,160,34);bx.fillText(bubble,160,34);
+        const bs=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(bc),transparent:true}));
+        bs.scale.set(3.5,.6,1);bs.position.y=3;bs.name='bubble';v.mesh.add(bs);
+        setTimeout(()=>{const ob=v.mesh.children.find(c=>c.name==='bubble');if(ob)v.mesh.remove(ob);},3000);
+      }
+    }
+    if(v.state==='seated'){
+      v.stateTimer--;
+      v.vaL.rotation.x=0;v.vaR.rotation.x=0;v.vlL.rotation.x=0;v.vlR.rotation.x=0;
+      // Occasional reaction
+      if(v.stateTimer%200===100){
+        const words=v.type==='interview'?['我有3年经验','对贵公司很感兴趣','薪资期望面议','我擅长AI开发','请问团队多大']:['太厉害了！','学到了很多','公司好大','原来如此','好先进的技术'];
+        const bc=document.createElement('canvas');bc.width=320;bc.height=48;
+        const bx=bc.getContext('2d');bx.font='bold 28px sans-serif';bx.fillStyle='#FFCC00';bx.textAlign='center';
+        bx.strokeStyle='rgba(0,0,0,0.7)';bx.lineWidth=3;
+        const wt=words[Math.floor(Math.random()*words.length)];
+        bx.strokeText(wt,160,34);bx.fillText(wt,160,34);
+        const bs=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(bc),transparent:true}));
+        bs.scale.set(3,.5,1);bs.position.y=3;bs.name='bubble';
+        const ob=v.mesh.children.find(c=>c.name==='bubble');if(ob)v.mesh.remove(ob);
+        v.mesh.add(bs);
+        setTimeout(()=>{const ob2=v.mesh.children.find(c=>c.name==='bubble');if(ob2)v.mesh.remove(ob2);},2500);
+      }
+      if(v.stateTimer<=0){
+        // Leave
+        v.state='leaving';
+        v.path=findPath(Math.round(v.mesh.position.x),Math.round(v.mesh.position.z),24,RH-1);
+        v.pathIdx=0;
+        logEvent('🧑‍💼 '+v.name+(v.type==='interview'?' 面试结束，离开':' 培训结束，离开'),'chat');
+      }
+    }
+    if(v.state==='leaving'){
+      if(v.path.length>0&&v.pathIdx<v.path.length){
+        const tg=v.path[v.pathIdx];
+        const tx=tg.x+.5,tz=tg.z+.5;
+        const dx3=tx-v.mesh.position.x,dz3=tz-v.mesh.position.z;
+        const dist3=Math.sqrt(dx3*dx3+dz3*dz3);
+        if(dist3<.2){v.pathIdx++;}
+        else{
+          v.mesh.position.x+=dx3/dist3*v.speed;
+          v.mesh.position.z+=dz3/dist3*v.speed;
+          v.mesh.rotation.y=Math.atan2(dx3,dz3);
+          const sw3=Math.sin(frame*.2)*.5;
+          v.vaL.rotation.x=sw3;v.vaR.rotation.x=-sw3;
+        }
+      }
+      if(v.pathIdx>=v.path.length||v.timer>2000){
+        scene.remove(v.mesh);visitors.splice(vi,1);
+      }
+    }
+  }
+
+  // Animate animals
+  animals.forEach(a=>{
+    const ud=a.userData;
+    ud.timer++;
+    if(ud.timer%120===0)ud.angle+=Math.random()*2-1;
+    const nx=ud.baseX+Math.sin(ud.angle+ud.timer*.01)*ud.range;
+    const nz=ud.baseZ+Math.cos(ud.angle+ud.timer*.013)*ud.range;
+    a.position.x+=(nx-a.position.x)*.01;
+    a.position.z+=(nz-a.position.z)*.01;
+    a.rotation.y=Math.atan2(nx-a.position.x,nz-a.position.z);
+    // Bobbing
+    if(ud.type==='chicken'||ud.type==='duck')a.position.y=Math.abs(Math.sin(frame*.08+ud.angle))*.06;
+  });
+  // Animate fish
+  fishes.forEach(f=>{
+    f.phase+=f.speed;
+    f.mesh.position.x=f.baseX+Math.sin(f.phase)*2.5;
+    f.mesh.position.z=f.baseZ+Math.cos(f.phase*.7)*.8;
+    f.mesh.rotation.y=Math.atan2(Math.cos(f.phase),Math.sin(f.phase*.7));
+    f.mesh.position.y=.02+Math.sin(f.phase*3)*.03;
+  });
+
+  // Anti-overlap: gentle push only when characters overlap too much
+  if(frame%3===0){
+    for(let i=0;i<chars.length;i++){
+      const a=chars[i];
+      if(a.userData.state==='working'||a.userData.state==='injured'||a.userData.state==='healing'||a.userData.state==='gaming'||a.userData.state==='gym'||a.userData.state==='in_meeting')continue;
+      for(let j=i+1;j<chars.length;j++){
+        const b=chars[j];
+        if(b.userData.state==='working'||b.userData.state==='injured'||b.userData.state==='healing'||b.userData.state==='gaming'||b.userData.state==='gym'||b.userData.state==='in_meeting')continue;
+        const dx2=a.position.x-b.position.x,dz2=a.position.z-b.position.z;
+        const d2=dx2*dx2+dz2*dz2;
+        if(d2<0.7&&d2>0.001){
+          const d=Math.sqrt(d2);
+          const push=(0.8-d)*0.05;
+          a.position.x+=dx2/d*push;a.position.z+=dz2/d*push;
+          b.position.x-=dx2/d*push;b.position.z-=dz2/d*push;
+        }
+      }
+    }
+  }
+
+  // Hover
+  raycaster.setFromCamera(mouse,camera);
+  const hits=raycaster.intersectObjects(chars,true);
+  const info=document.getElementById('info');
+  if(hits.length){
+    let o=hits[0].object;while(o.parent&&!o.userData.bot)o=o.parent;
+    if(o.userData.bot){
+      const b=o.userData.bot,u=o.userData;
+      const states={working:'💻工作中',walking:'🚶外出',returning:'🚶回岗',commanded:'📢执行命令',interacting:'💬互动中',summoning:'📢召见员工',summoned:'😰被叫去办公室',office_meeting:'🏢在总经理室',injured:'🤕受伤倒地',go_medical:'🚑送往医疗室',healing:'🛏️住院治疗中',visiting:'👑探望伤员',go_fishing:'🚶去鱼塘',fishing:'🐟喂鱼中',go_farm:'🚶去牧场',farming:'🐾喂动物中',go_gaming:'🚶去娱乐室',gaming:'🎮玩游戏中',go_gym:'🚶去健身房',gym:'🏋️锻炼中',go_meeting:'🚶去开会',in_meeting:'📋开会中'};
+      let interactInfo='';
+      if(u.interactWith){
+        const types={fight:'⚔️争执',chat:'💬聊天',play:'🎮玩耍',praise:'⭐被表扬',criticize:'⚠️被批评',tattle:'🗣️告状'};
+        interactInfo='<br>'+types[u.interactType]+' → '+u.interactWith.userData.bot.n;
+      }
+      info.style.display='block';
+      info.innerHTML='<div class="n">'+(b.persona?'👤':'🤖')+' '+b.f+(b.isNew?' <span style="color:#55FF55">★NEW</span>':'')+(b.is张总?' 👑':'')+'</div><div class="h">'+b.h+' | '+b.title+'</div><div class="r">'+b.r+'</div><div class="s">'+(states[u.state]||'💻')+interactInfo+'</div><div class="mood">心情: '+u.mood+'<br>💭 '+u.thought+'</div>';
+      renderer.domElement.style.cursor='pointer';
+    }else{info.style.display='none';renderer.domElement.style.cursor='grab';}
+  }else{info.style.display='none';renderer.domElement.style.cursor='grab';}
+
+  document.getElementById('clock').textContent=new Date().toLocaleTimeString('zh-CN');
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
